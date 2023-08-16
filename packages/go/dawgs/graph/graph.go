@@ -335,11 +335,11 @@ type Database interface {
 	// transaction.
 	BatchOperation(ctx context.Context, batchDelegate BatchDelegate) error
 
-	// AssertSchema will apply the given schema model to the underlying database.
-	AssertSchema(ctx context.Context, schema *Schema) error
+	// AssertSchema will apply the given schema to the underlying database.
+	AssertSchema(ctx context.Context, chart *DatabaseSchema) error
 
 	// FetchSchema will pull the schema of the underlying database and marshal it into the DAWGS schema model.
-	FetchSchema(ctx context.Context) (*Schema, error)
+	FetchSchema(ctx context.Context) (*DatabaseSchema, error)
 
 	// Run allows a user to pass statements directly to the database. Since results may rely on a transactional context
 	// only an error is returned from this function

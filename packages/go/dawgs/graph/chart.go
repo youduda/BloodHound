@@ -112,17 +112,12 @@ func (s KindSchemaContinuation) Index(name string, indexType IndexType) KindSche
 	return s
 }
 
-type Schema struct {
+type GraphSchema struct {
+	Name  string
 	Kinds map[Kind]*KindSchema
 }
 
-func NewSchema() *Schema {
-	return &Schema{
-		Kinds: make(map[Kind]*KindSchema),
-	}
-}
-
-func (s *Schema) ForKinds(kinds ...Kind) KindSchemaContinuation {
+func (s *GraphSchema) ForKinds(kinds ...Kind) KindSchemaContinuation {
 	var selectedKinds []*KindSchema
 
 	for _, kind := range kinds {
@@ -136,11 +131,11 @@ func (s *Schema) ForKinds(kinds ...Kind) KindSchemaContinuation {
 	}
 }
 
-func (s *Schema) Kind(kind Kind) *KindSchema {
+func (s *GraphSchema) Kind(kind Kind) *KindSchema {
 	return s.Kinds[kind]
 }
 
-func (s *Schema) EnsureKind(kind Kind) *KindSchema {
+func (s *GraphSchema) EnsureKind(kind Kind) *KindSchema {
 	if label, found := s.Kinds[kind]; found {
 		return label
 	} else {
@@ -155,7 +150,7 @@ func (s *Schema) EnsureKind(kind Kind) *KindSchema {
 	}
 }
 
-func (s *Schema) DefineKinds(kinds ...Kind) {
+func (s *GraphSchema) DefineKinds(kinds ...Kind) {
 	for _, kind := range kinds {
 		s.Kinds[kind] = &KindSchema{
 			Kind:                kind,
@@ -165,7 +160,7 @@ func (s *Schema) DefineKinds(kinds ...Kind) {
 	}
 }
 
-func (s *Schema) ConstrainProperty(name string, indexType IndexType) {
+func (s *GraphSchema) ConstrainProperty(name string, indexType IndexType) {
 	for _, kindSchema := range s.Kinds {
 		kindSchema.PropertyConstraints[name] = ConstraintSchema{
 			Name:      fmt.Sprintf("%s_%s_constraint", strings.ToLower(kindSchema.Name()), strings.ToLower(name)),
@@ -174,7 +169,7 @@ func (s *Schema) ConstrainProperty(name string, indexType IndexType) {
 	}
 }
 
-func (s *Schema) IndexProperty(name string, indexType IndexType) {
+func (s *GraphSchema) IndexProperty(name string, indexType IndexType) {
 	for _, labelSchema := range s.Kinds {
 		labelSchema.PropertyIndices[name] = IndexSchema{
 			Name:      fmt.Sprintf("%s_%s_index", strings.ToLower(labelSchema.Name()), strings.ToLower(name)),
@@ -183,7 +178,7 @@ func (s *Schema) IndexProperty(name string, indexType IndexType) {
 	}
 }
 
-func (s *Schema) String() string {
+func (s *GraphSchema) String() string {
 	output := strings.Builder{}
 
 	for _, kindSchema := range s.Kinds {
@@ -215,4 +210,28 @@ func (s *Schema) String() string {
 	}
 
 	return output.String()
+}
+
+type DatabaseSchema struct {
+	Graphs map[string]*GraphSchema
+}
+
+func NewDatabaseSchema() *DatabaseSchema {
+	return &DatabaseSchema{
+		Graphs: map[string]*GraphSchema{},
+	}
+}
+
+func (s *DatabaseSchema) Graph(name string) *GraphSchema {
+	if existingGraph, hasExisting := s.Graphs[name]; hasExisting {
+		return existingGraph
+	}
+
+	newGraph := &GraphSchema{
+		Name:  name,
+		Kinds: map[Kind]*KindSchema{},
+	}
+
+	s.Graphs[name] = newGraph
+	return newGraph
 }

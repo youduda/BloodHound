@@ -1,9 +1,46 @@
 package pg
 
 import (
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/specterops/bloodhound/dawgs/graph"
+	"strconv"
+	"strings"
 )
+
+const (
+	nodeTableName = "node"
+	edgeTableName = "edge"
+)
+
+func stringBuilderAppend(builder *strings.Builder, strings ...string) {
+	for idx := 0; idx < len(strings); idx++ {
+		builder.WriteString(strings[idx])
+	}
+}
+
+func formatPartitionTableName(parent string, graphID int32) string {
+	return parent + "_" + strconv.FormatInt(int64(graphID), 10)
+}
+
+func formatPartitionTableSQL(parent string, graphID int32) string {
+	var (
+		graphIDStr = strconv.FormatInt(int64(graphID), 10)
+		builder    = strings.Builder{}
+	)
+
+	stringBuilderAppend(
+		&builder,
+		"create table ", parent, "_", graphIDStr, " partition of ", parent,
+		" for values in (", graphIDStr, ")")
+
+	return builder.String()
+}
+
+const fetchPartitionSQL = `
+select inhrelid::regclass as child from pg_catalog.pg_inherits
+where inhparent = @parent::regclass
+`
 
 const graphSchemaSQLUp = `
 create table graph (
@@ -51,18 +88,16 @@ drop table if exists graph;
 `
 
 type Schema struct {
-	Graphs         map[string]int16
-	Kinds          map[graph.Kind]int16
-	NodePartitions map[string]int16
-	EdgePartitions map[string]int16
+	Graphs map[string]int32
+	Kinds  map[graph.Kind]int16
 }
 
 func (s *Schema) fetchGraphs(tx graph.Transaction) error {
 	var (
-		graphID int16
+		graphID int32
 		name    string
 
-		graphs = map[string]int16{}
+		graphs = map[string]int32{}
 		result = tx.Run(`select id, name from graph`, nil)
 	)
 
@@ -78,6 +113,10 @@ func (s *Schema) fetchGraphs(tx graph.Transaction) error {
 
 	s.Graphs = graphs
 	return result.Error()
+}
+
+func (s *Schema) validatePartitions(tx graph.Transaction) error {
+	return nil
 }
 
 func (s *Schema) fetchKinds(tx graph.Transaction) error {
@@ -105,6 +144,10 @@ func (s *Schema) fetchKinds(tx graph.Transaction) error {
 
 func (s *Schema) Fetch(tx graph.Transaction) error {
 	if err := s.fetchGraphs(tx); err != nil {
+		return err
+	}
+
+	if err := s.validatePartitions(tx); err != nil {
 		return err
 	}
 
@@ -136,11 +179,56 @@ func (s *Schema) DefineKind(tx graph.Transaction, kind graph.Kind) (int16, error
 	return kindID, result.Error()
 }
 
-func (s *Schema) Define(tx graph.Transaction, graphSchema *graph.Schema) error {
-	if err := s.Fetch(tx); err != nil {
+func (s *Schema) createGraphPartition(tx graph.Transaction, parent string, graphID int32) error {
+	result := tx.Run(formatPartitionTableSQL(parent, graphID), nil)
+	defer result.Close()
+
+	return result.Error()
+}
+
+func (s *Schema) createGraphPartitions(tx graph.Transaction, graphID int32) error {
+	if err := s.createGraphPartition(tx, nodeTableName, graphID); err != nil {
 		return err
 	}
 
+	return s.createGraphPartition(tx, edgeTableName, graphID)
+}
+
+func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (int32, error) {
+	var (
+		graphID int32
+		result  = tx.Run(`insert into graph (name) values (@name) returning id`, map[string]any{
+			"name": graphSchema.Name,
+		})
+	)
+
+	defer result.Close()
+
+	if !result.Next() {
+		return -1, fmt.Errorf("no ID returned from graph entry creation")
+	}
+
+	if err := result.Scan(&graphID); err != nil {
+		return 1, fmt.Errorf("failed mapping ID from graph entry creation: %w", err)
+	}
+
+	s.Graphs[graphSchema.Name] = graphID
+	return graphID, nil
+}
+
+func (s *Schema) getOrCreateGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (int32, error) {
+	if graphID, hasGraph := s.Graphs[graphSchema.Name]; hasGraph {
+		return graphID, nil
+	}
+
+	if graphID, err := s.createGraph(tx, graphSchema); err != nil {
+		return -1, err
+	} else {
+		return graphID, s.createGraphPartitions(tx, graphID)
+	}
+}
+
+func (s *Schema) DefineGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) error {
 	for kind := range graphSchema.Kinds {
 		if _, isDefined := s.Kinds[kind]; !isDefined {
 			if kindID, err := s.DefineKind(tx, kind); err != nil {
@@ -148,6 +236,24 @@ func (s *Schema) Define(tx graph.Transaction, graphSchema *graph.Schema) error {
 			} else {
 				s.Kinds[kind] = kindID
 			}
+		}
+	}
+
+	if _, err := s.getOrCreateGraph(tx, graphSchema); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Schema) Define(tx graph.Transaction, databaseSchema *graph.DatabaseSchema) error {
+	if err := s.Fetch(tx); err != nil {
+		return err
+	}
+
+	for _, graphSchema := range databaseSchema.Graphs {
+		if err := s.DefineGraph(tx, graphSchema); err != nil {
+			return err
 		}
 	}
 

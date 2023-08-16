@@ -17,9 +17,11 @@ func TestDriver_Run(t *testing.T) {
 	require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
 	require.Nil(t, pg.InitSchemaUp(context.Background(), driver))
 
-	schema := graph.NewSchema()
-	schema.DefineKinds(ad.NodeKinds()...)
-	schema.DefineKinds(ad.Relationships()...)
+	schema := graph.NewDatabaseSchema()
+	adGraph := schema.Graph("ad_graph")
+
+	adGraph.DefineKinds(ad.NodeKinds()...)
+	adGraph.DefineKinds(ad.Relationships()...)
 
 	require.Nil(t, driver.AssertSchema(context.Background(), schema))
 	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {

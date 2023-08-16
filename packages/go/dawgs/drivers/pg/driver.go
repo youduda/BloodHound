@@ -84,8 +84,8 @@ func (s *driver) WriteTransaction(ctx context.Context, txDelegate graph.Transact
 	return s.transaction(ctx, txDelegate, readWriteTxOptions, graph.TransactionConfig{})
 }
 
-func (s *driver) FetchSchema(ctx context.Context) (*graph.Schema, error) {
-	schema := graph.NewSchema()
+func (s *driver) FetchSchema(ctx context.Context) (*graph.DatabaseSchema, error) {
+	schema := graph.NewDatabaseSchema()
 	return schema, nil
 }
 
@@ -95,7 +95,7 @@ func (s *driver) updateSchema(ctx context.Context) error {
 	})
 }
 
-func (s *driver) AssertSchema(ctx context.Context, graphSchema *graph.Schema) error {
+func (s *driver) AssertSchema(ctx context.Context, graphSchema *graph.DatabaseSchema) error {
 	return s.WriteTransaction(ctx, func(tx graph.Transaction) error {
 		return s.schema.Define(tx, graphSchema)
 	})
