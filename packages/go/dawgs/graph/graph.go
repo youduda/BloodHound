@@ -233,10 +233,6 @@ type Batch interface {
 	// exist, created.
 	UpdateNodeBy(update NodeUpdate) error
 
-	// CreateRelationship creates a new Relationship from the start Node to the end Node with the given Kind and
-	// Properties and returns the creation as a RelationshipResult.
-	CreateRelationship(startNode, endNode *Node, kind Kind, properties *Properties) error
-
 	// CreateRelationshipByIDs creates a new Relationship from the start Node to the end Node with the given Kind and
 	// Properties and returns the creation as a RelationshipResult.
 	CreateRelationshipByIDs(startNodeID, endNodeID ID, kind Kind, properties *Properties) error

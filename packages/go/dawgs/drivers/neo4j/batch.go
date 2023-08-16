@@ -1,17 +1,17 @@
 // Copyright 2023 Specter Ops, Inc.
-// 
+//
 // Licensed under the Apache License, Version 2.0
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 // SPDX-License-Identifier: Apache-2.0
 
 package neo4j
@@ -118,26 +118,6 @@ func (s *batchTransaction) CreateNode(properties *graph.Properties, kinds ...gra
 
 func (s *batchTransaction) UpdateNode(target *graph.Node) error {
 	return s.innerTx.UpdateNode(target)
-}
-
-func (s *batchTransaction) CreateRelationship(startNode, endNode *graph.Node, kind graph.Kind, properties *graph.Properties) error {
-	if startNode.ID == graph.UnregisteredNodeID {
-		if newStartNode, err := s.innerTx.CreateNode(startNode.Properties, startNode.Kinds...); err != nil {
-			return err
-		} else {
-			startNode = newStartNode
-		}
-	}
-
-	if endNode.ID == graph.UnregisteredNodeID {
-		if newEndNode, err := s.innerTx.CreateNode(endNode.Properties, endNode.Kinds...); err != nil {
-			return err
-		} else {
-			endNode = newEndNode
-		}
-	}
-
-	return s.CreateRelationshipByIDs(startNode.ID, endNode.ID, kind, properties)
 }
 
 func (s *batchTransaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, kind graph.Kind, properties *graph.Properties) error {

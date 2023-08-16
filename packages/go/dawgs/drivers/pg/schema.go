@@ -290,7 +290,7 @@ func (s *Schema) Define(tx graph.Transaction, databaseSchema *graph.DatabaseSche
 	return s.Fetch(tx)
 }
 
-func (s *Schema) IDs(kinds ...graph.Kind) ([]int16, bool) {
+func (s *Schema) KindIDs(kinds ...graph.Kind) ([]int16, bool) {
 	ids := make([]int16, len(kinds))
 
 	for idx, kind := range kinds {

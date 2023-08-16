@@ -56,8 +56,8 @@ func (s *transaction) getTargetGraph() (Graph, error) {
 func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {
 	if graphTarget, err := s.getTargetGraph(); err != nil {
 		return nil, err
-	} else if kindIDSlice, hasAllIDs := s.schema.IDs(kinds...); !hasAllIDs {
-		return nil, fmt.Errorf("unable to map all kinds")
+	} else if kindIDSlice, hasAllIDs := s.schema.KindIDs(kinds...); !hasAllIDs {
+		return nil, fmt.Errorf("unable to map all kinds: %v", kinds)
 	} else {
 		var (
 			nodeID int32
@@ -92,13 +92,32 @@ func (s *transaction) Nodes() graph.NodeQuery {
 }
 
 func (s *transaction) CreateRelationship(startNode, endNode *graph.Node, kind graph.Kind, properties *graph.Properties) (*graph.Relationship, error) {
-	//TODO implement me
-	panic("implement me")
+	return nil, fmt.Errorf("unsupported")
 }
 
 func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, kind graph.Kind, properties *graph.Properties) (*graph.Relationship, error) {
-	//TODO implement me
-	panic("implement me")
+	if graphTarget, err := s.getTargetGraph(); err != nil {
+		return nil, err
+	} else if kindID, hasKind := s.schema.Kinds[kind]; !hasKind {
+		return nil, fmt.Errorf("unable to map all kind: %s", kind)
+	} else {
+		var (
+			edgeID int32
+			result = s.tx.QueryRow(s.ctx, `insert into edge (graph_id, start_id, end_id, kind_id, properties) values (@graph_id, @start_id, @end_id, @kind_id, @properties) returning id`, pgx.NamedArgs{
+				"graph_id":   graphTarget.ID,
+				"start_id":   startNodeID,
+				"end_id":     endNodeID,
+				"kind_id":    kindID,
+				"properties": properties.MapOrEmpty(),
+			})
+		)
+
+		if err := result.Scan(&edgeID); err != nil {
+			return nil, err
+		}
+
+		return graph.NewRelationship(graph.ID(edgeID), startNodeID, endNodeID, properties, kind), err
+	}
 }
 
 func (s *transaction) UpdateRelationship(relationship *graph.Relationship) error {

@@ -28,11 +28,22 @@ func TestDriver_Run(t *testing.T) {
 		// Scope to the AD graph
 		tx = tx.WithGraph("ad_graph")
 
-		_, err := tx.CreateNode(graph.AsProperties(map[string]any{
+		if domainNode, err := tx.CreateNode(graph.AsProperties(map[string]any{
 			"name":      "user",
+			"objectid":  "12345",
 			"domainsid": "12345",
-		}), ad.Entity, ad.User)
+		}), ad.Entity, ad.User); err != nil {
+			return err
+		} else if userNode, err := tx.CreateNode(graph.AsProperties(map[string]any{
+			"name":      "user",
+			"objectid":  "12345",
+			"domainsid": "12345",
+		}), ad.Entity, ad.User); err != nil {
+			return err
+		} else if _, err := tx.CreateRelationshipByIDs(domainNode.ID, userNode.ID, ad.Contains, nil); err != nil {
+			return err
+		}
 
-		return err
+		return nil
 	}))
 }

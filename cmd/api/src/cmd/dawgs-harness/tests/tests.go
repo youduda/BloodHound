@@ -413,7 +413,7 @@ func BatchNodeAndRelationshipCreationTest(testCase *TestCase) any {
 			)
 
 			if err := testCase.Sample(func() error {
-				return batch.CreateRelationship(startNode, endNode, ad.MemberOf, graph.AsProperties(graph.PropertyMap{
+				return batch.CreateRelationshipByIDs(startNode.ID, endNode.ID, ad.MemberOf, graph.AsProperties(graph.PropertyMap{
 					common.Name:     relationshipPropertyValue,
 					common.ObjectID: relationshipPropertyValue,
 				}))
