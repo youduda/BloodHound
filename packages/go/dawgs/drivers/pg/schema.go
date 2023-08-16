@@ -13,30 +13,6 @@ const (
 	edgeTableName = "edge"
 )
 
-func stringBuilderAppend(builder *strings.Builder, strings ...string) {
-	for idx := 0; idx < len(strings); idx++ {
-		builder.WriteString(strings[idx])
-	}
-}
-
-func formatPartitionTableName(parent string, graphID int32) string {
-	return parent + "_" + strconv.FormatInt(int64(graphID), 10)
-}
-
-func formatPartitionTableSQL(parent string, graphID int32) string {
-	var (
-		graphIDStr = strconv.FormatInt(int64(graphID), 10)
-		builder    = strings.Builder{}
-	)
-
-	stringBuilderAppend(
-		&builder,
-		"create table ", parent, "_", graphIDStr, " partition of ", parent,
-		" for values in (", graphIDStr, ")")
-
-	return builder.String()
-}
-
 const fetchPartitionSQL = `
 select inhrelid::regclass as child from pg_catalog.pg_inherits
 where inhparent = @parent::regclass
@@ -61,23 +37,35 @@ create table kind (
 
 create table node (
     id serial,
-	graph_id integer not null,
-	kinds smallint[8],
+	graph_id integer not null references graph(id),
+	kind_ids smallint[8] not null,
+	properties jsonb not null,
 
 	primary key (id, graph_id)
-)
+) partition by list (graph_id);
 
-partition by list (graph_id);
+alter table node alter column properties set storage main;
+
+create index node_graph_id_index on node using btree (graph_id);
+create index node_kind_ids_index on node using gin (kind_ids);
 
 create table edge (
     id serial,
-	graph_id integer not null,
-	kind smallint references kind(id),
+    graph_id integer not null references graph(id),
+    start_id integer not null,
+    end_id integer not null,
+	kind_id smallint not null,
+	properties jsonb not null,
 
 	primary key (id, graph_id)
-)
+) partition by list (graph_id);
 
-partition by list (graph_id);
+alter table edge alter column properties set storage main;
+
+create index edge_graph_id_index on edge using btree (graph_id);
+create index edge_start_id_index on edge using btree (start_id);
+create index edge_end_id_index on edge using btree (end_id);
+create index edge_kind_index on edge using btree (kind_id);
 `
 
 const graphSchemaSQLDown = `
@@ -87,27 +75,71 @@ drop table if exists kind;
 drop table if exists graph;
 `
 
+func formatPartitionTableName(parent string, graphID int32) string {
+	return parent + "_" + strconv.FormatInt(int64(graphID), 10)
+}
+
+func formatPartitionTableSQL(parent string, graphID int32) string {
+	var (
+		graphIDStr = strconv.FormatInt(int64(graphID), 10)
+		builder    = strings.Builder{}
+	)
+
+	builder.WriteString("create table ")
+	builder.WriteString(parent)
+	builder.WriteString("_")
+	builder.WriteString(graphIDStr)
+	builder.WriteString(" partition of ")
+	builder.WriteString(parent)
+	builder.WriteString(" for values in (")
+	builder.WriteString(graphIDStr)
+	builder.WriteString(")")
+
+	return builder.String()
+}
+
+type Graph struct {
+	ID            int32
+	Name          string
+	NodePartition string
+	EdgePartition string
+}
+
+func NewGraph(id int32, name string) Graph {
+	return Graph{
+		ID:            id,
+		Name:          name,
+		NodePartition: formatPartitionTableName(nodeTableName, id),
+		EdgePartition: formatPartitionTableName(edgeTableName, id),
+	}
+}
+
 type Schema struct {
-	Graphs map[string]int32
+	Graphs map[string]Graph
 	Kinds  map[graph.Kind]int16
 }
 
 func (s *Schema) fetchGraphs(tx graph.Transaction) error {
 	var (
-		graphID int32
-		name    string
+		graphID   int32
+		graphName string
 
-		graphs = map[string]int32{}
+		graphs = map[string]Graph{}
 		result = tx.Run(`select id, name from graph`, nil)
 	)
 
 	defer result.Close()
 
 	for result.Next() {
-		if err := result.Scan(&graphID, &name); err != nil {
+		if err := result.Scan(&graphID, &graphName); err != nil {
 			return err
 		} else {
-			graphs[name] = graphID
+			graphs[graphName] = Graph{
+				ID:            graphID,
+				Name:          graphName,
+				NodePartition: formatPartitionTableName(nodeTableName, graphID),
+				EdgePartition: formatPartitionTableName(edgeTableName, graphID),
+			}
 		}
 	}
 
@@ -194,7 +226,7 @@ func (s *Schema) createGraphPartitions(tx graph.Transaction, graphID int32) erro
 	return s.createGraphPartition(tx, edgeTableName, graphID)
 }
 
-func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (int32, error) {
+func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (Graph, error) {
 	var (
 		graphID int32
 		result  = tx.Run(`insert into graph (name) values (@name) returning id`, map[string]any{
@@ -205,27 +237,19 @@ func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchem
 	defer result.Close()
 
 	if !result.Next() {
-		return -1, fmt.Errorf("no ID returned from graph entry creation")
+		return Graph{}, fmt.Errorf("no ID returned from graph entry creation")
 	}
 
 	if err := result.Scan(&graphID); err != nil {
-		return 1, fmt.Errorf("failed mapping ID from graph entry creation: %w", err)
+		return Graph{}, fmt.Errorf("failed mapping ID from graph entry creation: %w", err)
 	}
 
-	s.Graphs[graphSchema.Name] = graphID
-	return graphID, nil
-}
-
-func (s *Schema) getOrCreateGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (int32, error) {
-	if graphID, hasGraph := s.Graphs[graphSchema.Name]; hasGraph {
-		return graphID, nil
-	}
-
-	if graphID, err := s.createGraph(tx, graphSchema); err != nil {
-		return -1, err
-	} else {
-		return graphID, s.createGraphPartitions(tx, graphID)
-	}
+	return Graph{
+		ID:            graphID,
+		Name:          graphSchema.Name,
+		NodePartition: formatPartitionTableName(nodeTableName, graphID),
+		EdgePartition: formatPartitionTableName(edgeTableName, graphID),
+	}, nil
 }
 
 func (s *Schema) DefineGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) error {
@@ -239,8 +263,14 @@ func (s *Schema) DefineGraph(tx graph.Transaction, graphSchema *graph.GraphSchem
 		}
 	}
 
-	if _, err := s.getOrCreateGraph(tx, graphSchema); err != nil {
-		return err
+	if _, isDefined := s.Graphs[graphSchema.Name]; !isDefined {
+		if newGraphInst, err := s.createGraph(tx, graphSchema); err != nil {
+			return err
+		} else if err := s.createGraphPartitions(tx, newGraphInst.ID); err != nil {
+			return err
+		} else {
+			s.Graphs[newGraphInst.Name] = newGraphInst
+		}
 	}
 
 	return nil

@@ -256,16 +256,16 @@ type Batch interface {
 // Transaction is an interface that contains all operations that may be executed against a DAWGS driver. DAWGS drivers are
 // expected to support all Transaction operations in-transaction.
 type Transaction interface {
+	// WithGraph scopes the transaction to a specific graph. If the driver for the transaction does not support
+	// multiple  graphs the resulting transaction will target the default graph instead and this call becomes a no-op.
+	WithGraph(graphName string) Transaction
+
 	// CreateNode creates a new Node in the database and returns the creation as a NodeResult.
 	CreateNode(properties *Properties, kinds ...Kind) (*Node, error)
 
 	// UpdateNode updates a Node in the database with the given Node by ID. UpdateNode will not create missing Node
 	// entries in the database. Use CreateNode first to create a new Node.
 	UpdateNode(node *Node) error
-
-	// UpdateNodeBy updates a Node by attempting to write a valid merge statement for the criteria in the given
-	// NodeUpdate struct.
-	UpdateNodeBy(update NodeUpdate) error
 
 	// Nodes creates a new NodeQuery and returns it.
 	Nodes() NodeQuery
@@ -282,10 +282,6 @@ type Transaction interface {
 	// will not create missing Relationship entries in the database. Use CreateRelationship first to create a new
 	// Relationship.
 	UpdateRelationship(relationship *Relationship) error
-
-	// UpdateRelationshipBy updates a Relationship by attempting to write a valid merge statement for the criteria in
-	// the given RelationshipUpdate struct.
-	UpdateRelationshipBy(update RelationshipUpdate) error
 
 	// Relationships creates a new RelationshipQuery and returns it.
 	Relationships() RelationshipQuery

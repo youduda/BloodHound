@@ -25,7 +25,14 @@ func TestDriver_Run(t *testing.T) {
 
 	require.Nil(t, driver.AssertSchema(context.Background(), schema))
 	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
-		_, err := tx.CreateNode(nil, ad.Entity, ad.User)
+		// Scope to the AD graph
+		tx = tx.WithGraph("ad_graph")
+
+		_, err := tx.CreateNode(graph.AsProperties(map[string]any{
+			"name":      "user",
+			"domainsid": "12345",
+		}), ad.Entity, ad.User)
+
 		return err
 	}))
 }

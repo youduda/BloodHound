@@ -9,9 +9,11 @@ import (
 )
 
 type transaction struct {
-	schema Schema
-	ctx    context.Context
-	tx     pgx.Tx
+	schema         Schema
+	ctx            context.Context
+	tx             pgx.Tx
+	targetGraph    string
+	hasTargetGraph bool
 }
 
 func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, currentSchema Schema) (*transaction, error) {
@@ -19,11 +21,19 @@ func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptio
 		return nil, err
 	} else {
 		return &transaction{
-			schema: currentSchema,
-			ctx:    ctx,
-			tx:     pgxTx,
+			schema:         currentSchema,
+			ctx:            ctx,
+			tx:             pgxTx,
+			hasTargetGraph: false,
 		}, nil
 	}
+}
+
+func (s *transaction) WithGraph(graphName string) graph.Transaction {
+	s.targetGraph = graphName
+	s.hasTargetGraph = true
+
+	return s
 }
 
 func (s *transaction) Close() {
@@ -33,16 +43,36 @@ func (s *transaction) Close() {
 	}
 }
 
-func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {
-	if kindIDSlice, hasAllIDs := s.schema.IDs(kinds...); !hasAllIDs {
-		return nil, fmt.Errorf("unable to map all kinds to IDs")
+func (s *transaction) getTargetGraph() (Graph, error) {
+	if !s.hasTargetGraph {
+		return Graph{}, fmt.Errorf("postgresql driver requires a graph target to be set")
+	} else if targetGraph, hasGraph := s.schema.Graphs[s.targetGraph]; !hasGraph {
+		return Graph{}, fmt.Errorf("unknown graph: %s", s.targetGraph)
 	} else {
-		_, err := s.tx.Exec(s.ctx, `insert into node (graph_id, kinds) values (@graph_id, @kinds)`, map[string]any{
-			"graph_id": 1,
-			"kinds":    kindIDSlice,
-		})
+		return targetGraph, nil
+	}
+}
 
+func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {
+	if graphTarget, err := s.getTargetGraph(); err != nil {
 		return nil, err
+	} else if kindIDSlice, hasAllIDs := s.schema.IDs(kinds...); !hasAllIDs {
+		return nil, fmt.Errorf("unable to map all kinds")
+	} else {
+		var (
+			nodeID int32
+			result = s.tx.QueryRow(s.ctx, `insert into node (graph_id, kind_ids, properties) values (@graph_id, @kind_ids, @properties) returning id`, pgx.NamedArgs{
+				"graph_id":   graphTarget.ID,
+				"kind_ids":   kindIDSlice,
+				"properties": properties.Map,
+			})
+		)
+
+		if err := result.Scan(&nodeID); err != nil {
+			return nil, err
+		}
+
+		return graph.NewNode(graph.ID(nodeID), properties, kinds...), err
 	}
 }
 
