@@ -1,4 +1,4 @@
-package pg_test
+package harness
 
 import (
 	"context"
@@ -14,19 +14,14 @@ func TestDriver_Run(t *testing.T) {
 	driver, err := dawgs.Open(pg.DriverName, "user=bhe dbname=bhe password=bhe4eva host=localhost")
 	require.Nil(t, err)
 
-	require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
+	//require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
 	require.Nil(t, pg.InitSchemaUp(context.Background(), driver))
 
-	require.Nil(t, driver.AssertSchema(context.Background(), graph.Schema{
-		Kinds: append(ad.Nodes(), ad.Relationships()...),
-		Graphs: []graph.Graph{{
-			Name: "ad_graph",
-		}},
-	}))
+	require.Nil(t, driver.AssertSchema(context.Background(), CurrentSchema()))
 
 	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
-		// Scope to the AD graph
-		tx = tx.WithGraph("ad_graph")
+		// Scope to an AD graph
+		tx = tx.WithGraph("ad_graph", ActiveDirectoryGraphSchema())
 
 		if domainNode, err := tx.CreateNode(graph.AsProperties(map[string]any{
 			"name":      "user",
@@ -40,8 +35,16 @@ func TestDriver_Run(t *testing.T) {
 			"domainsid": "12345",
 		}), ad.Entity, ad.User); err != nil {
 			return err
-		} else if _, err := tx.CreateRelationshipByIDs(domainNode.ID, userNode.ID, ad.Contains, nil); err != nil {
+		} else if edge, err := tx.CreateRelationshipByIDs(domainNode.ID, userNode.ID, ad.Contains, graph.NewProperties()); err != nil {
 			return err
+		} else {
+			domainNode.Properties.Set("other_prop", "lol")
+			userNode.Properties.Set("is_bad", true)
+			edge.Properties.Set("thing", "yes")
+
+			require.Nil(t, tx.UpdateNode(domainNode))
+			require.Nil(t, tx.UpdateNode(userNode))
+			require.Nil(t, tx.UpdateRelationship(edge))
 		}
 
 		return nil

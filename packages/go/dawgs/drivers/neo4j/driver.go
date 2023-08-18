@@ -130,10 +130,17 @@ func (s *driver) WriteTransaction(ctx context.Context, txDelegate graph.Transact
 	return s.transaction(ctx, txDelegate, session, options)
 }
 
-func (s *driver) FetchSchema(ctx context.Context) (*graph.Schema, error) {
-	schema := graph.NewSchema()
+func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
+	var (
+		graphSchema = graph.Graph{}
+		dbSchema    = graph.Schema{
+			Graphs: []graph.Graph{
+				graphSchema,
+			},
+		}
+	)
 
-	return schema, s.ReadTransaction(ctx, func(tx graph.Transaction) error {
+	return dbSchema, s.ReadTransaction(ctx, func(tx graph.Transaction) error {
 		if result := tx.Run("call db.indexes() yield name, uniqueness, provider, labelsOrTypes, properties;", nil); result.Error() != nil {
 			return result.Error()
 		} else {
@@ -161,13 +168,22 @@ func (s *driver) FetchSchema(ctx context.Context) (*graph.Schema, error) {
 					return fmt.Errorf("composite index types are currently not supported")
 				}
 
-				label := labels[0]
-				property := properties[0]
+				if kind := graph.StringKind(labels[0]); !graphSchema.Kinds.ContainsOneOf(kind) {
+					graphSchema.Kinds = graphSchema.Kinds.Add(kind)
+				}
 
 				if uniqueness == "UNIQUE" {
-					schema.EnsureKind(graph.StringKind(label)).Constraint(property, name, parseProviderType(provider))
+					graphSchema.Constraints = append(graphSchema.Constraints, graph.Constraint{
+						Name:  name,
+						Field: properties[0],
+						Type:  parseProviderType(provider),
+					})
 				} else {
-					schema.EnsureKind(graph.StringKind(label)).Index(property, name, parseProviderType(provider))
+					graphSchema.Indexes = append(graphSchema.Indexes, graph.Index{
+						Name:  name,
+						Field: properties[0],
+						Type:  parseProviderType(provider),
+					})
 				}
 			}
 
@@ -176,7 +192,7 @@ func (s *driver) FetchSchema(ctx context.Context) (*graph.Schema, error) {
 	})
 }
 
-func (s *driver) AssertSchema(ctx context.Context, schema *graph.Schema) error {
+func (s *driver) AssertSchema(ctx context.Context, schema graph.Schema) error {
 	if existingSchema, err := s.FetchSchema(ctx); err != nil {
 		return fmt.Errorf("could not load schema: %w", err)
 	} else {

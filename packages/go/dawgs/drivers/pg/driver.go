@@ -88,12 +88,6 @@ func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
 	return graph.Schema{}, nil
 }
 
-func (s *driver) updateSchema(ctx context.Context) error {
-	return s.ReadTransaction(ctx, func(tx graph.Transaction) error {
-		return s.schemaManager.fetch(tx)
-	})
-}
-
 func (s *driver) AssertSchema(ctx context.Context, graphSchema graph.Schema) error {
 	return s.WriteTransaction(ctx, func(tx graph.Transaction) error {
 		return s.schemaManager.AssertSchema(tx, graphSchema)

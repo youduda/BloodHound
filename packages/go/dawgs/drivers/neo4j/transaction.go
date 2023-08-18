@@ -53,7 +53,7 @@ type neo4jTransaction struct {
 	batchWriteSize int
 }
 
-func (s *neo4jTransaction) WithGraph(graphName string) graph.Transaction {
+func (s *neo4jTransaction) WithGraph(graphName string, graphSchema graph.Graph) graph.Transaction {
 	return s
 }
 

@@ -12,8 +12,9 @@ type transaction struct {
 	schemaManager     *SchemaManager
 	ctx               context.Context
 	tx                pgx.Tx
+	targetGraphSet    bool
+	targetGraphName   string
 	targetGraphSchema graph.Graph
-	hasTargetGraph    bool
 }
 
 func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *SchemaManager) (*transaction, error) {
@@ -24,16 +25,15 @@ func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptio
 			schemaManager:  schemaManager,
 			ctx:            ctx,
 			tx:             pgxTx,
-			hasTargetGraph: false,
+			targetGraphSet: false,
 		}, nil
 	}
 }
 
-func (s *transaction) WithGraph(graphName string) graph.Transaction {
-	s.hasTargetGraph = true
-	s.targetGraphSchema = graph.Graph{
-		Name: graphName,
-	}
+func (s *transaction) WithGraph(graphName string, graphSchema graph.Graph) graph.Transaction {
+	s.targetGraphSet = true
+	s.targetGraphName = graphName
+	s.targetGraphSchema = graphSchema
 
 	return s
 }
@@ -46,11 +46,11 @@ func (s *transaction) Close() {
 }
 
 func (s *transaction) getTargetGraph() (Graph, error) {
-	if !s.hasTargetGraph {
-		return Graph{}, fmt.Errorf("postgresql driver requires a graph target to be set")
+	if !s.targetGraphSet {
+		return Graph{}, fmt.Errorf("driver operation requires a graph target to be set")
 	}
 
-	return s.schemaManager.AssertGraph(s, s.targetGraphSchema)
+	return s.schemaManager.AssertGraph(s, s.targetGraphName, s.targetGraphSchema)
 }
 
 func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {
@@ -64,7 +64,7 @@ func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Ki
 			result = s.tx.QueryRow(s.ctx, `insert into node (graph_id, kind_ids, properties) values (@graph_id, @kind_ids, @properties) returning id`, pgx.NamedArgs{
 				"graph_id":   graphTarget.ID,
 				"kind_ids":   kindIDSlice,
-				"properties": properties.Map,
+				"properties": properties.MapOrEmpty(),
 			})
 		)
 
@@ -77,13 +77,17 @@ func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Ki
 }
 
 func (s *transaction) UpdateNode(node *graph.Node) error {
-	//TODO implement me
-	panic("implement me")
-}
+	if kindIDSlice, err := s.schemaManager.AssertKinds(s, node.Kinds); err != nil {
+		return err
+	} else {
+		_, err := s.tx.Exec(s.ctx, `update node set kind_ids = @kind_ids, properties = @properties where id = @node_id`, pgx.NamedArgs{
+			"node_id":    node.ID,
+			"kind_ids":   kindIDSlice,
+			"properties": node.Properties.MapOrEmpty(),
+		})
 
-func (s *transaction) UpdateNodeBy(update graph.NodeUpdate) error {
-	//TODO implement me
-	panic("implement me")
+		return err
+	}
 }
 
 func (s *transaction) Nodes() graph.NodeQuery {
@@ -121,13 +125,17 @@ func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, k
 }
 
 func (s *transaction) UpdateRelationship(relationship *graph.Relationship) error {
-	//TODO implement me
-	panic("implement me")
-}
+	if kindIDSlice, err := s.schemaManager.AssertKinds(s, graph.Kinds{relationship.Kind}); err != nil {
+		return err
+	} else {
+		_, err := s.tx.Exec(s.ctx, `update edge set kind_id = @kind_id, properties = @properties where id = @edge_id`, pgx.NamedArgs{
+			"edge_id":    relationship.ID,
+			"kind_id":    kindIDSlice[0],
+			"properties": relationship.Properties.MapOrEmpty(),
+		})
 
-func (s *transaction) UpdateRelationshipBy(update graph.RelationshipUpdate) error {
-	//TODO implement me
-	panic("implement me")
+		return err
+	}
 }
 
 func (s *transaction) Relationships() graph.RelationshipQuery {

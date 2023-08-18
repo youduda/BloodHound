@@ -1,17 +1,17 @@
 // Copyright 2023 Specter Ops, Inc.
-// 
+//
 // Licensed under the Apache License, Version 2.0
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 // SPDX-License-Identifier: Apache-2.0
 
 package neo4j
@@ -87,7 +87,7 @@ func AssertNodePropertyIndex(db graph.Database, kind graph.Kind, propertyName st
 	})
 }
 
-func formatDropSchemaCypherStmts(indexSchemas map[string]graph.IndexSchema, constraintSchemas map[string]graph.ConstraintSchema) []string {
+func formatDropSchemaCypherStmts(indexSchemas []graph.Index, constraintSchemas []graph.Constraint) []string {
 	var (
 		cypherStatements []string
 		builder          strings.Builder
@@ -114,127 +114,133 @@ func formatDropSchemaCypherStmts(indexSchemas map[string]graph.IndexSchema, cons
 	return cypherStatements
 }
 
-func assertAgainst(ctx context.Context, requiredSchema, existingSchema *graph.Schema, db graph.Database) error {
-	var (
-		createConstraints = func(requiredKindSchema *graph.KindSchema, constraints map[string]graph.ConstraintSchema) error {
-			for property, constraintToCreate := range constraints {
-				if err := db.Run(ctx, createPropertyConstraintStatement, map[string]interface{}{
-					"name":       constraintToCreate.Name,
-					"labels":     []string{requiredKindSchema.Name()},
-					"properties": []string{property},
-					"provider":   indexTypeProvider(constraintToCreate.IndexType),
-				}); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}
-
-		createIndices = func(requiredKindSchema *graph.KindSchema, indices map[string]graph.IndexSchema) error {
-			for property, indexToCreate := range indices {
-				if err := db.Run(ctx, createPropertyIndexStatement, map[string]interface{}{
-					"name":       indexToCreate.Name,
-					"labels":     []string{requiredKindSchema.Name()},
-					"properties": []string{property},
-					"provider":   indexTypeProvider(indexToCreate.IndexType),
-				}); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}
-	)
-
-	for _, kindSchema := range existingSchema.Kinds {
-		if requiredKindSchema, hasMatchingDefinition := requiredSchema.Kinds[kindSchema.Kind]; !hasMatchingDefinition {
-			// Remove all schematic definitions for the kind since there's no matching requirement
-			for _, dropStmt := range formatDropSchemaCypherStmts(kindSchema.PropertyIndices, kindSchema.PropertyConstraints) {
-				if err := db.Run(ctx, dropStmt, nil); err != nil {
-					return err
-				}
-			}
-		} else {
-			var (
-				indicesToAdd        = map[string]graph.IndexSchema{}
-				indicesToRemove     = map[string]graph.IndexSchema{}
-				constraintsToAdd    = map[string]graph.ConstraintSchema{}
-				constraintsToRemove = map[string]graph.ConstraintSchema{}
-			)
-
-			// Match existing schematics to the definitions first
-			for property, indexSchema := range kindSchema.PropertyIndices {
-				if requiredIndexSchema, hasMatchingDefinition := requiredKindSchema.PropertyIndices[property]; !hasMatchingDefinition {
-					// If there's no matching index for this property defined, remove it from the database
-					indicesToRemove[property] = indexSchema
-				} else if !indexSchema.Equals(requiredIndexSchema) {
-					// The existing index does not match the requirement properties, recreate it
-					indicesToRemove[property] = indexSchema
-					indicesToAdd[property] = requiredIndexSchema
-				}
-			}
-
-			// Sweep required schematics to ensure that missing entries are created
-			for property, requiredIndexSchema := range requiredKindSchema.PropertyIndices {
-				if _, hasMatchingDefinition := kindSchema.PropertyIndices[property]; !hasMatchingDefinition {
-					// If there's no matching index for this property defined, create it
-					indicesToAdd[property] = requiredIndexSchema
-				}
-			}
-
-			for property, constraintSchema := range kindSchema.PropertyConstraints {
-				if requiredConstraintSchema, hasMatchingDefinition := requiredKindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
-					// If there's no matching constraint for this property defined, remove it from the database
-					constraintsToRemove[property] = constraintSchema
-				} else if !constraintSchema.Equals(requiredConstraintSchema) {
-					// The existing constraint does not match the requirement properties, recreate it
-					constraintsToRemove[property] = constraintSchema
-					constraintsToAdd[property] = requiredConstraintSchema
-				}
-			}
-
-			for property, constraintSchema := range requiredKindSchema.PropertyConstraints {
-				if _, hasMatchingDefinition := kindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
-					// If there's no matching constraint for this property defined, create it
-					constraintsToAdd[property] = constraintSchema
-				}
-			}
-
-			// Drop all indices and constraints first
-			for _, dropStmt := range formatDropSchemaCypherStmts(indicesToRemove, constraintsToRemove) {
-				if err := db.Run(ctx, dropStmt, nil); err != nil {
-					return err
-				}
-			}
-
-			if err := createIndices(requiredKindSchema, indicesToAdd); err != nil {
-				return err
-			}
-
-			if err := createConstraints(requiredKindSchema, constraintsToAdd); err != nil {
-				return err
-			}
-		}
-	}
-
-	for _, requiredKindSchema := range requiredSchema.Kinds {
-		if _, hasMatchingDefinition := existingSchema.Kinds[requiredKindSchema.Kind]; !hasMatchingDefinition {
-			// There's no matching definitions for indices or constraints for the required kind. Create them.
-			if err := createIndices(requiredKindSchema, requiredKindSchema.PropertyIndices); err != nil {
-				return err
-			}
-
-			if err := createConstraints(requiredKindSchema, requiredKindSchema.PropertyConstraints); err != nil {
-				return err
-			}
-		}
-	}
+func assertAgainst(ctx context.Context, requiredSchema, existingSchema graph.Schema, db graph.Database) error {
+	//var (
+	//	createConstraints = func(kind graph.Kind, constraints []graph.Constraint) error {
+	//		for _, constraintToCreate := range constraints {
+	//			if err := db.Run(ctx, createPropertyConstraintStatement, map[string]interface{}{
+	//				"name":       constraintToCreate.Name,
+	//				"labels":     []string{kind.String()},
+	//				"properties": []string{constraintToCreate.Field},
+	//				"provider":   indexTypeProvider(constraintToCreate.Type),
+	//			}); err != nil {
+	//				return err
+	//			}
+	//		}
+	//
+	//		return nil
+	//	}
+	//
+	//	createIndices = func(kind graph.Kind, indexes []graph.Index) error {
+	//		for _, indexToCreate := range indexes {
+	//			if err := db.Run(ctx, createPropertyIndexStatement, map[string]interface{}{
+	//				"name":       indexToCreate.Name,
+	//				"labels":     []string{kind.String()},
+	//				"properties": []string{indexToCreate.Field},
+	//				"provider":   indexTypeProvider(indexToCreate.Type),
+	//			}); err != nil {
+	//				return err
+	//			}
+	//		}
+	//
+	//		return nil
+	//	}
+	//)
+	//
+	//for _, existingGraphSchema := range existingSchema.Graphs {
+	//	for _, requiredIndex := range existingGraphSchema.Indexes {
+	//
+	//	}
+	//}
+	//
+	//for _, kindSchema := range existingSchema.Kinds {
+	//	if requiredKindSchema, hasMatchingDefinition := requiredSchema.Kinds[kindSchema.Kind]; !hasMatchingDefinition {
+	//		// Remove all schematic definitions for the kind since there's no matching requirement
+	//		for _, dropStmt := range formatDropSchemaCypherStmts(kindSchema.PropertyIndices, kindSchema.PropertyConstraints) {
+	//			if err := db.Run(ctx, dropStmt, nil); err != nil {
+	//				return err
+	//			}
+	//		}
+	//	} else {
+	//		var (
+	//			indicesToAdd        = map[string]graph.IndexSchema{}
+	//			indicesToRemove     = map[string]graph.IndexSchema{}
+	//			constraintsToAdd    = map[string]graph.ConstraintSchema{}
+	//			constraintsToRemove = map[string]graph.ConstraintSchema{}
+	//		)
+	//
+	//		// Match existing schematics to the definitions first
+	//		for property, indexSchema := range kindSchema.PropertyIndices {
+	//			if requiredIndexSchema, hasMatchingDefinition := requiredKindSchema.PropertyIndices[property]; !hasMatchingDefinition {
+	//				// If there's no matching index for this property defined, remove it from the database
+	//				indicesToRemove[property] = indexSchema
+	//			} else if !indexSchema.Equals(requiredIndexSchema) {
+	//				// The existing index does not match the requirement properties, recreate it
+	//				indicesToRemove[property] = indexSchema
+	//				indicesToAdd[property] = requiredIndexSchema
+	//			}
+	//		}
+	//
+	//		// Sweep required schematics to ensure that missing entries are created
+	//		for property, requiredIndexSchema := range requiredKindSchema.PropertyIndices {
+	//			if _, hasMatchingDefinition := kindSchema.PropertyIndices[property]; !hasMatchingDefinition {
+	//				// If there's no matching index for this property defined, create it
+	//				indicesToAdd[property] = requiredIndexSchema
+	//			}
+	//		}
+	//
+	//		for property, constraintSchema := range kindSchema.PropertyConstraints {
+	//			if requiredConstraintSchema, hasMatchingDefinition := requiredKindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
+	//				// If there's no matching constraint for this property defined, remove it from the database
+	//				constraintsToRemove[property] = constraintSchema
+	//			} else if !constraintSchema.Equals(requiredConstraintSchema) {
+	//				// The existing constraint does not match the requirement properties, recreate it
+	//				constraintsToRemove[property] = constraintSchema
+	//				constraintsToAdd[property] = requiredConstraintSchema
+	//			}
+	//		}
+	//
+	//		for property, constraintSchema := range requiredKindSchema.PropertyConstraints {
+	//			if _, hasMatchingDefinition := kindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
+	//				// If there's no matching constraint for this property defined, create it
+	//				constraintsToAdd[property] = constraintSchema
+	//			}
+	//		}
+	//
+	//		// Drop all indices and constraints first
+	//		for _, dropStmt := range formatDropSchemaCypherStmts(indicesToRemove, constraintsToRemove) {
+	//			if err := db.Run(ctx, dropStmt, nil); err != nil {
+	//				return err
+	//			}
+	//		}
+	//
+	//		if err := createIndices(requiredKindSchema, indicesToAdd); err != nil {
+	//			return err
+	//		}
+	//
+	//		if err := createConstraints(requiredKindSchema, constraintsToAdd); err != nil {
+	//			return err
+	//		}
+	//	}
+	//}
+	//
+	//for _, requiredKindSchema := range requiredSchema.Kinds {
+	//	if _, hasMatchingDefinition := existingSchema.Kinds[requiredKindSchema.Kind]; !hasMatchingDefinition {
+	//		// There's no matching definitions for indices or constraints for the required kind. Create them.
+	//		if err := createIndices(requiredKindSchema, requiredKindSchema.PropertyIndices); err != nil {
+	//			return err
+	//		}
+	//
+	//		if err := createConstraints(requiredKindSchema, requiredKindSchema.PropertyConstraints); err != nil {
+	//			return err
+	//		}
+	//	}
+	//}
 
 	return nil
 }
 
-func AssertSchema(ctx context.Context, db graph.Database, desiredSchema *graph.Schema) error {
+func AssertSchema(ctx context.Context, db graph.Database, desiredSchema graph.Schema) error {
 	if existingSchema, err := db.FetchSchema(ctx); err != nil {
 		return fmt.Errorf("could not load schema: %w", err)
 	} else {

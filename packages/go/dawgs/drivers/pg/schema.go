@@ -20,7 +20,7 @@ where inhparent = @parent::regclass
 `
 
 const graphSchemaSQLUp = `
-create table graph (
+create table if not exists graph (
     id serial,
     name varchar(256) not null,
 
@@ -28,7 +28,7 @@ create table graph (
     unique (name)
 );
 
-create table kind (
+create table if not exists kind (
 	id smallserial,
     name varchar(256) not null,
 
@@ -36,7 +36,7 @@ create table kind (
     unique (name)
 );
 
-create table node (
+create table if not exists node (
     id serial,
 	graph_id integer not null references graph(id),
 	kind_ids smallint[8] not null,
@@ -47,10 +47,10 @@ create table node (
 
 alter table node alter column properties set storage main;
 
-create index node_graph_id_index on node using btree (graph_id);
-create index node_kind_ids_index on node using gin (kind_ids);
+create index if not exists node_graph_id_index on node using btree (graph_id);
+create index if not exists node_kind_ids_index on node using gin (kind_ids);
 
-create table edge (
+create table if not exists edge (
     id serial,
     graph_id integer not null references graph(id),
     start_id integer not null,
@@ -63,10 +63,10 @@ create table edge (
 
 alter table edge alter column properties set storage main;
 
-create index edge_graph_id_index on edge using btree (graph_id);
-create index edge_start_id_index on edge using btree (start_id);
-create index edge_end_id_index on edge using btree (end_id);
-create index edge_kind_index on edge using btree (kind_id);
+create index if not exists edge_graph_id_index on edge using btree (graph_id);
+create index if not exists edge_start_id_index on edge using btree (start_id);
+create index if not exists edge_end_id_index on edge using btree (end_id);
+create index if not exists edge_kind_index on edge using btree (kind_id);
 `
 
 const graphSchemaSQLDown = `
@@ -184,11 +184,7 @@ func (s *SchemaManager) fetch(tx graph.Transaction) error {
 		return err
 	}
 
-	if err := s.fetchKinds(tx); err != nil {
-		return err
-	}
-
-	return nil
+	return s.fetchKinds(tx)
 }
 
 func (s *SchemaManager) defineKind(tx graph.Transaction, kind graph.Kind) (int16, error) {
@@ -227,11 +223,11 @@ func (s *SchemaManager) createGraphPartitions(tx graph.Transaction, graphID int3
 	return s.createGraphPartition(tx, edgeTableName, graphID)
 }
 
-func (s *SchemaManager) createGraph(tx graph.Transaction, graphSchema graph.Graph) (Graph, error) {
+func (s *SchemaManager) createGraph(tx graph.Transaction, graphName string, graphSchema graph.Graph) (Graph, error) {
 	var (
 		graphID int32
 		result  = tx.Run(`insert into graph (name) values (@name) returning id`, map[string]any{
-			"name": graphSchema.Name,
+			"name": graphName,
 		})
 	)
 
@@ -247,7 +243,7 @@ func (s *SchemaManager) createGraph(tx graph.Transaction, graphSchema graph.Grap
 
 	return Graph{
 		ID:            graphID,
-		Name:          graphSchema.Name,
+		Name:          graphName,
 		NodePartition: formatPartitionTableName(nodeTableName, graphID),
 		EdgePartition: formatPartitionTableName(edgeTableName, graphID),
 	}, nil
@@ -277,25 +273,23 @@ func (s *SchemaManager) missingKinds(kinds graph.Kinds) graph.Kinds {
 	return missingKinds
 }
 
-func (s *SchemaManager) defineGraph(tx graph.Transaction, graphSchema graph.Graph) error {
-	if graphDefinition, err := s.createGraph(tx, graphSchema); err != nil {
-		return err
-	} else {
-		s.graphs[graphSchema.Name] = graphDefinition
-		return s.createGraphPartitions(tx, graphDefinition.ID)
-	}
-}
-
-func (s *SchemaManager) defineGraphs(tx graph.Transaction, graphSchemas []graph.Graph) error {
+func (s *SchemaManager) defineGraphKinds(tx graph.Transaction, graphSchemas []graph.Graph) error {
 	for _, graphSchema := range graphSchemas {
-		if _, isDefined := s.graphs[graphSchema.Name]; !isDefined {
-			if err := s.defineGraph(tx, graphSchema); err != nil {
-				return err
-			}
+		if err := s.defineKinds(tx, s.missingKinds(graphSchema.Kinds)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (s *SchemaManager) defineGraph(tx graph.Transaction, graphName string, graphSchema graph.Graph) error {
+	if graphDefinition, err := s.createGraph(tx, graphName, graphSchema); err != nil {
+		return err
+	} else {
+		s.graphs[graphName] = graphDefinition
+		return s.createGraphPartitions(tx, graphDefinition.ID)
+	}
 }
 
 func (s *SchemaManager) kindIDs(kinds graph.Kinds) []int16 {
@@ -336,11 +330,11 @@ func (s *SchemaManager) AssertKinds(tx graph.Transaction, kinds graph.Kinds) ([]
 	return s.kindIDs(kinds), nil
 }
 
-func (s *SchemaManager) AssertGraph(tx graph.Transaction, graphSchema graph.Graph) (Graph, error) {
+func (s *SchemaManager) AssertGraph(tx graph.Transaction, graphName string, graphSchema graph.Graph) (Graph, error) {
 	// Acquire a read-lock first to fast-pass validate if we're missing the graph definitions
 	s.lock.RLock()
 
-	if graphInstance, isDefined := s.graphs[graphSchema.Name]; isDefined {
+	if graphInstance, isDefined := s.graphs[graphName]; isDefined {
 		// The graph is defined. Release the read-lock here before returning
 		s.lock.RUnlock()
 		return graphInstance, nil
@@ -353,16 +347,14 @@ func (s *SchemaManager) AssertGraph(tx graph.Transaction, graphSchema graph.Grap
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if err := s.defineGraph(tx, graphSchema); err != nil {
+	if err := s.defineGraph(tx, graphName, graphSchema); err != nil {
 		return Graph{}, err
 	}
 
-	return s.graphs[graphSchema.Name], nil
+	return s.graphs[graphName], nil
 }
 
 func (s *SchemaManager) AssertSchema(tx graph.Transaction, dbSchema graph.Schema) error {
-	// Schema assertion is meant primarily for DB initialization so acquire a write-lock instead of validating with
-	// a read-lock first
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -370,9 +362,13 @@ func (s *SchemaManager) AssertSchema(tx graph.Transaction, dbSchema graph.Schema
 		return err
 	}
 
-	if err := s.defineKinds(tx, s.missingKinds(dbSchema.Kinds)); err != nil {
-		return err
+	for _, graphSchema := range dbSchema.Graphs {
+		if missingKinds := s.missingKinds(graphSchema.Kinds); len(missingKinds) > 0 {
+			if err := s.defineKinds(tx, missingKinds); err != nil {
+				return err
+			}
+		}
 	}
 
-	return s.defineGraphs(tx, dbSchema.Graphs)
+	return nil
 }

@@ -254,7 +254,7 @@ type Batch interface {
 type Transaction interface {
 	// WithGraph scopes the transaction to a specific graph. If the driver for the transaction does not support
 	// multiple  graphs the resulting transaction will target the default graph instead and this call becomes a no-op.
-	WithGraph(graphName string) Transaction
+	WithGraph(graphName string, graphSchema Graph) Transaction
 
 	// CreateNode creates a new Node in the database and returns the creation as a NodeResult.
 	CreateNode(properties *Properties, kinds ...Kind) (*Node, error)
@@ -265,10 +265,6 @@ type Transaction interface {
 
 	// Nodes creates a new NodeQuery and returns it.
 	Nodes() NodeQuery
-
-	// CreateRelationship creates a new Relationship from the start Node to the end Node with the given Kind and
-	// Properties and returns the creation as a RelationshipResult.
-	CreateRelationship(startNode, endNode *Node, kind Kind, properties *Properties) (*Relationship, error)
 
 	// CreateRelationshipByIDs creates a new Relationship from the start Node to the end Node with the given Kind and
 	// Properties and returns the creation as a RelationshipResult.
@@ -328,7 +324,7 @@ type Database interface {
 	BatchOperation(ctx context.Context, batchDelegate BatchDelegate) error
 
 	// AssertSchema will apply the given schema to the underlying database.
-	AssertSchema(ctx context.Context, chart Schema) error
+	AssertSchema(ctx context.Context, dbSchema Schema) error
 
 	// FetchSchema will pull the schema of the underlying database and marshal it into the DAWGS schema model.
 	FetchSchema(ctx context.Context) (Schema, error)
