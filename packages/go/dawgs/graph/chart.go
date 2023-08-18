@@ -16,222 +16,51 @@
 
 package graph
 
-import (
-	"fmt"
-	"strings"
-)
-
 type IndexType int
 
 const (
-	UnsupportedIndex    IndexType = 0
-	BTreeIndex          IndexType = 1
-	FullTextSearchIndex IndexType = 2
+	BTreeIndex    IndexType = 1
+	FullTextIndex IndexType = 2
 )
 
 func (s IndexType) String() string {
 	switch s {
 	case BTreeIndex:
-		return "BTreeIndex"
-	case FullTextSearchIndex:
-		return "FullTextSearchIndex"
-	case UnsupportedIndex:
-		fallthrough
+		return "btree"
+
+	case FullTextIndex:
+		return "fts"
+
 	default:
-		return "UnsupportedIndex"
+		return "invalid"
 	}
 }
 
-type ConstraintSchema struct {
-	Name      string
+type Constraint struct {
+	Field     string
 	IndexType IndexType
 }
 
-func (s ConstraintSchema) Equals(other ConstraintSchema) bool {
-	return s.Name == other.Name && s.IndexType == other.IndexType
+func (s Constraint) Name() string {
+	return s.Field + "_" + s.IndexType.String() + "_constraint"
 }
 
-type IndexSchema struct {
-	Name      string
-	IndexType IndexType
+type Index struct {
+	Field string
+	Type  IndexType
 }
 
-func (s IndexSchema) Equals(other IndexSchema) bool {
-	return s.Name == other.Name && s.IndexType == other.IndexType
+func (s Index) Name() string {
+	return s.Field + "_" + s.Type.String() + "_index"
 }
 
-type KindSchema struct {
-	Kind                Kind
-	PropertyIndices     map[string]IndexSchema
-	PropertyConstraints map[string]ConstraintSchema
+type Graph struct {
+	Name        string
+	Constraints []Constraint
+	Indexes     []Index
 }
 
-func (s *KindSchema) Name() string {
-	return s.Kind.String()
-}
-
-func (s *KindSchema) Constraint(property, name string, indexType IndexType) {
-	s.PropertyConstraints[property] = ConstraintSchema{
-		Name:      name,
-		IndexType: indexType,
-	}
-}
-
-func (s *KindSchema) ConstrainProperty(property string, indexType IndexType) {
-	s.Constraint(property, fmt.Sprintf("%s_%s_constraint", strings.ToLower(s.Name()), strings.ToLower(property)), indexType)
-}
-
-func (s *KindSchema) Index(property, name string, indexType IndexType) {
-	s.PropertyIndices[property] = IndexSchema{
-		Name:      name,
-		IndexType: indexType,
-	}
-}
-
-func (s *KindSchema) IndexProperty(property string, indexType IndexType) {
-	s.Index(property, fmt.Sprintf("%s_%s_index", strings.ToLower(s.Name()), strings.ToLower(property)), indexType)
-}
-
-type KindSchemaContinuation struct {
-	kinds []*KindSchema
-}
-
-func (s KindSchemaContinuation) Constrain(name string, indexType IndexType) KindSchemaContinuation {
-	for _, label := range s.kinds {
-		label.ConstrainProperty(name, indexType)
-	}
-
-	return s
-}
-
-func (s KindSchemaContinuation) Index(name string, indexType IndexType) KindSchemaContinuation {
-	for _, label := range s.kinds {
-		label.IndexProperty(name, indexType)
-	}
-
-	return s
-}
-
-type GraphSchema struct {
-	Name  string
-	Kinds map[Kind]*KindSchema
-}
-
-func (s *GraphSchema) ForKinds(kinds ...Kind) KindSchemaContinuation {
-	var selectedKinds []*KindSchema
-
-	for _, kind := range kinds {
-		if kind, found := s.Kinds[kind]; found {
-			selectedKinds = append(selectedKinds, kind)
-		}
-	}
-
-	return KindSchemaContinuation{
-		kinds: selectedKinds,
-	}
-}
-
-func (s *GraphSchema) Kind(kind Kind) *KindSchema {
-	return s.Kinds[kind]
-}
-
-func (s *GraphSchema) EnsureKind(kind Kind) *KindSchema {
-	if label, found := s.Kinds[kind]; found {
-		return label
-	} else {
-		newLabel := &KindSchema{
-			Kind:                kind,
-			PropertyIndices:     make(map[string]IndexSchema),
-			PropertyConstraints: make(map[string]ConstraintSchema),
-		}
-
-		s.Kinds[kind] = newLabel
-		return newLabel
-	}
-}
-
-func (s *GraphSchema) DefineKinds(kinds ...Kind) {
-	for _, kind := range kinds {
-		s.Kinds[kind] = &KindSchema{
-			Kind:                kind,
-			PropertyIndices:     make(map[string]IndexSchema),
-			PropertyConstraints: make(map[string]ConstraintSchema),
-		}
-	}
-}
-
-func (s *GraphSchema) ConstrainProperty(name string, indexType IndexType) {
-	for _, kindSchema := range s.Kinds {
-		kindSchema.PropertyConstraints[name] = ConstraintSchema{
-			Name:      fmt.Sprintf("%s_%s_constraint", strings.ToLower(kindSchema.Name()), strings.ToLower(name)),
-			IndexType: indexType,
-		}
-	}
-}
-
-func (s *GraphSchema) IndexProperty(name string, indexType IndexType) {
-	for _, labelSchema := range s.Kinds {
-		labelSchema.PropertyIndices[name] = IndexSchema{
-			Name:      fmt.Sprintf("%s_%s_index", strings.ToLower(labelSchema.Name()), strings.ToLower(name)),
-			IndexType: indexType,
-		}
-	}
-}
-
-func (s *GraphSchema) String() string {
-	output := strings.Builder{}
-
-	for _, kindSchema := range s.Kinds {
-		output.WriteString("Label: ")
-		output.WriteString(kindSchema.Name())
-		output.WriteRune('\n')
-
-		for propertyName, constraint := range kindSchema.PropertyConstraints {
-			output.WriteString("\t")
-			output.WriteString(propertyName)
-			output.WriteString(" ")
-			output.WriteString(constraint.Name)
-			output.WriteString("[")
-			output.WriteString(constraint.IndexType.String())
-			output.WriteString("]\n")
-		}
-
-		for propertyName, index := range kindSchema.PropertyIndices {
-			output.WriteString("\t")
-			output.WriteString(propertyName)
-			output.WriteString(" ")
-			output.WriteString(index.Name)
-			output.WriteString("[")
-			output.WriteString(index.IndexType.String())
-			output.WriteString("]\n")
-		}
-
-		output.WriteRune('\n')
-	}
-
-	return output.String()
-}
-
-type DatabaseSchema struct {
-	Graphs map[string]*GraphSchema
-}
-
-func NewDatabaseSchema() *DatabaseSchema {
-	return &DatabaseSchema{
-		Graphs: map[string]*GraphSchema{},
-	}
-}
-
-func (s *DatabaseSchema) Graph(name string) *GraphSchema {
-	if existingGraph, hasExisting := s.Graphs[name]; hasExisting {
-		return existingGraph
-	}
-
-	newGraph := &GraphSchema{
-		Name:  name,
-		Kinds: map[Kind]*KindSchema{},
-	}
-
-	s.Graphs[name] = newGraph
-	return newGraph
+type Schema struct {
+	Kinds  []Kind
+	Graphs []Graph
 }

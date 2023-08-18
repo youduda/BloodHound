@@ -6,6 +6,7 @@ import (
 	"github.com/specterops/bloodhound/dawgs/graph"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -105,21 +106,21 @@ type Graph struct {
 	EdgePartition string
 }
 
-func NewGraph(id int32, name string) Graph {
-	return Graph{
-		ID:            id,
-		Name:          name,
-		NodePartition: formatPartitionTableName(nodeTableName, id),
-		EdgePartition: formatPartitionTableName(edgeTableName, id),
+type SchemaManager struct {
+	graphs map[string]Graph
+	kinds  map[graph.Kind]int16
+	lock   *sync.RWMutex
+}
+
+func NewSchemaManager() *SchemaManager {
+	return &SchemaManager{
+		graphs: map[string]Graph{},
+		kinds:  map[graph.Kind]int16{},
+		lock:   &sync.RWMutex{},
 	}
 }
 
-type Schema struct {
-	Graphs map[string]Graph
-	Kinds  map[graph.Kind]int16
-}
-
-func (s *Schema) fetchGraphs(tx graph.Transaction) error {
+func (s *SchemaManager) fetchGraphs(tx graph.Transaction) error {
 	var (
 		graphID   int32
 		graphName string
@@ -143,15 +144,15 @@ func (s *Schema) fetchGraphs(tx graph.Transaction) error {
 		}
 	}
 
-	s.Graphs = graphs
+	s.graphs = graphs
 	return result.Error()
 }
 
-func (s *Schema) validatePartitions(tx graph.Transaction) error {
+func (s *SchemaManager) validatePartitions(tx graph.Transaction) error {
 	return nil
 }
 
-func (s *Schema) fetchKinds(tx graph.Transaction) error {
+func (s *SchemaManager) fetchKinds(tx graph.Transaction) error {
 	var (
 		kindID   int16
 		kindName string
@@ -170,11 +171,11 @@ func (s *Schema) fetchKinds(tx graph.Transaction) error {
 		kinds[graph.StringKind(kindName)] = kindID
 	}
 
-	s.Kinds = kinds
+	s.kinds = kinds
 	return result.Error()
 }
 
-func (s *Schema) Fetch(tx graph.Transaction) error {
+func (s *SchemaManager) fetch(tx graph.Transaction) error {
 	if err := s.fetchGraphs(tx); err != nil {
 		return err
 	}
@@ -190,7 +191,7 @@ func (s *Schema) Fetch(tx graph.Transaction) error {
 	return nil
 }
 
-func (s *Schema) DefineKind(tx graph.Transaction, kind graph.Kind) (int16, error) {
+func (s *SchemaManager) defineKind(tx graph.Transaction, kind graph.Kind) (int16, error) {
 	var (
 		kindID int16
 		result = tx.Run(`insert into kind (name) values (@name) returning id`, map[string]any{
@@ -211,14 +212,14 @@ func (s *Schema) DefineKind(tx graph.Transaction, kind graph.Kind) (int16, error
 	return kindID, result.Error()
 }
 
-func (s *Schema) createGraphPartition(tx graph.Transaction, parent string, graphID int32) error {
+func (s *SchemaManager) createGraphPartition(tx graph.Transaction, parent string, graphID int32) error {
 	result := tx.Run(formatPartitionTableSQL(parent, graphID), nil)
 	defer result.Close()
 
 	return result.Error()
 }
 
-func (s *Schema) createGraphPartitions(tx graph.Transaction, graphID int32) error {
+func (s *SchemaManager) createGraphPartitions(tx graph.Transaction, graphID int32) error {
 	if err := s.createGraphPartition(tx, nodeTableName, graphID); err != nil {
 		return err
 	}
@@ -226,7 +227,7 @@ func (s *Schema) createGraphPartitions(tx graph.Transaction, graphID int32) erro
 	return s.createGraphPartition(tx, edgeTableName, graphID)
 }
 
-func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) (Graph, error) {
+func (s *SchemaManager) createGraph(tx graph.Transaction, graphSchema graph.Graph) (Graph, error) {
 	var (
 		graphID int32
 		result  = tx.Run(`insert into graph (name) values (@name) returning id`, map[string]any{
@@ -252,54 +253,126 @@ func (s *Schema) createGraph(tx graph.Transaction, graphSchema *graph.GraphSchem
 	}, nil
 }
 
-func (s *Schema) DefineGraph(tx graph.Transaction, graphSchema *graph.GraphSchema) error {
-	for kind := range graphSchema.Kinds {
-		if _, isDefined := s.Kinds[kind]; !isDefined {
-			if kindID, err := s.DefineKind(tx, kind); err != nil {
-				return err
-			} else {
-				s.Kinds[kind] = kindID
-			}
-		}
-	}
-
-	if _, isDefined := s.Graphs[graphSchema.Name]; !isDefined {
-		if newGraphInst, err := s.createGraph(tx, graphSchema); err != nil {
-			return err
-		} else if err := s.createGraphPartitions(tx, newGraphInst.ID); err != nil {
+func (s *SchemaManager) defineKinds(tx graph.Transaction, kinds graph.Kinds) error {
+	for _, kind := range kinds {
+		if kindID, err := s.defineKind(tx, kind); err != nil {
 			return err
 		} else {
-			s.Graphs[newGraphInst.Name] = newGraphInst
+			s.kinds[kind] = kindID
 		}
 	}
 
 	return nil
 }
 
-func (s *Schema) Define(tx graph.Transaction, databaseSchema *graph.DatabaseSchema) error {
-	if err := s.Fetch(tx); err != nil {
+func (s *SchemaManager) missingKinds(kinds graph.Kinds) graph.Kinds {
+	var missingKinds graph.Kinds
+
+	for _, kind := range kinds {
+		if _, isDefined := s.kinds[kind]; !isDefined {
+			missingKinds = append(missingKinds, kind)
+		}
+	}
+
+	return missingKinds
+}
+
+func (s *SchemaManager) defineGraph(tx graph.Transaction, graphSchema graph.Graph) error {
+	if graphDefinition, err := s.createGraph(tx, graphSchema); err != nil {
+		return err
+	} else {
+		s.graphs[graphSchema.Name] = graphDefinition
+		return s.createGraphPartitions(tx, graphDefinition.ID)
+	}
+}
+
+func (s *SchemaManager) defineGraphs(tx graph.Transaction, graphSchemas []graph.Graph) error {
+	for _, graphSchema := range graphSchemas {
+		if _, isDefined := s.graphs[graphSchema.Name]; !isDefined {
+			if err := s.defineGraph(tx, graphSchema); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *SchemaManager) kindIDs(kinds graph.Kinds) []int16 {
+	ids := make([]int16, 0, len(kinds))
+
+	for _, kind := range kinds {
+		if id, hasID := s.kinds[kind]; hasID {
+			ids = append(ids, id)
+		}
+	}
+
+	return ids
+}
+
+func (s *SchemaManager) AssertKinds(tx graph.Transaction, kinds graph.Kinds) ([]int16, error) {
+	// Acquire a read-lock first to fast-pass validate if we're missing any kind definitions
+	s.lock.RLock()
+
+	if missingKinds := s.missingKinds(kinds); len(missingKinds) == 0 {
+		// All kinds are defined. Release the read-lock here before returning
+		s.lock.RUnlock()
+		return s.kindIDs(kinds), nil
+	}
+
+	// Release the read-lock here so that we can acquire a write-lock
+	s.lock.RUnlock()
+
+	// Acquire a write-lock and release on-exit
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// We have to re-acquire the missing kinds since there's a potential for another writer to acquire the write-lock
+	// inbetween release of the read-lock and acquisition of the write-lock for this operation
+	if err := s.defineKinds(tx, s.missingKinds(kinds)); err != nil {
+		return nil, err
+	}
+
+	return s.kindIDs(kinds), nil
+}
+
+func (s *SchemaManager) AssertGraph(tx graph.Transaction, graphSchema graph.Graph) (Graph, error) {
+	// Acquire a read-lock first to fast-pass validate if we're missing the graph definitions
+	s.lock.RLock()
+
+	if graphInstance, isDefined := s.graphs[graphSchema.Name]; isDefined {
+		// The graph is defined. Release the read-lock here before returning
+		s.lock.RUnlock()
+		return graphInstance, nil
+	}
+
+	// Release the read-lock here so that we can acquire a write-lock
+	s.lock.RUnlock()
+
+	// Acquire a write-lock and create the graph definition
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if err := s.defineGraph(tx, graphSchema); err != nil {
+		return Graph{}, err
+	}
+
+	return s.graphs[graphSchema.Name], nil
+}
+
+func (s *SchemaManager) AssertSchema(tx graph.Transaction, dbSchema graph.Schema) error {
+	// Schema assertion is meant primarily for DB initialization so acquire a write-lock instead of validating with
+	// a read-lock first
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if err := s.fetch(tx); err != nil {
 		return err
 	}
 
-	for _, graphSchema := range databaseSchema.Graphs {
-		if err := s.DefineGraph(tx, graphSchema); err != nil {
-			return err
-		}
+	if err := s.defineKinds(tx, s.missingKinds(dbSchema.Kinds)); err != nil {
+		return err
 	}
 
-	return s.Fetch(tx)
-}
-
-func (s *Schema) KindIDs(kinds ...graph.Kind) ([]int16, bool) {
-	ids := make([]int16, len(kinds))
-
-	for idx, kind := range kinds {
-		if id, hasID := s.Kinds[kind]; !hasID {
-			return nil, false
-		} else {
-			ids[idx] = id
-		}
-	}
-
-	return ids, true
+	return s.defineGraphs(tx, dbSchema.Graphs)
 }

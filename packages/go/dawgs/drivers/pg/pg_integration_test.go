@@ -17,13 +17,13 @@ func TestDriver_Run(t *testing.T) {
 	require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
 	require.Nil(t, pg.InitSchemaUp(context.Background(), driver))
 
-	schema := graph.NewDatabaseSchema()
-	adGraph := schema.Graph("ad_graph")
+	require.Nil(t, driver.AssertSchema(context.Background(), graph.Schema{
+		Kinds: append(ad.Nodes(), ad.Relationships()...),
+		Graphs: []graph.Graph{{
+			Name: "ad_graph",
+		}},
+	}))
 
-	adGraph.DefineKinds(ad.NodeKinds()...)
-	adGraph.DefineKinds(ad.Relationships()...)
-
-	require.Nil(t, driver.AssertSchema(context.Background(), schema))
 	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
 		// Scope to the AD graph
 		tx = tx.WithGraph("ad_graph")

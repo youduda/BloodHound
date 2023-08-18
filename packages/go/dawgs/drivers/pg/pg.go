@@ -43,6 +43,7 @@ func newDatabase(connectionString string) (graph.Database, error) {
 	} else {
 		return &driver{
 			pool:                      pool,
+			schemaManager:             NewSchemaManager(),
 			defaultTransactionTimeout: defaultTransactionTimeout,
 		}, nil
 	}

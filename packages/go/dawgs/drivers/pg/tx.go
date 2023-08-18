@@ -9,19 +9,19 @@ import (
 )
 
 type transaction struct {
-	schema         Schema
-	ctx            context.Context
-	tx             pgx.Tx
-	targetGraph    string
-	hasTargetGraph bool
+	schemaManager     *SchemaManager
+	ctx               context.Context
+	tx                pgx.Tx
+	targetGraphSchema graph.Graph
+	hasTargetGraph    bool
 }
 
-func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, currentSchema Schema) (*transaction, error) {
+func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *SchemaManager) (*transaction, error) {
 	if pgxTx, err := conn.BeginTx(ctx, options); err != nil {
 		return nil, err
 	} else {
 		return &transaction{
-			schema:         currentSchema,
+			schemaManager:  schemaManager,
 			ctx:            ctx,
 			tx:             pgxTx,
 			hasTargetGraph: false,
@@ -30,8 +30,10 @@ func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptio
 }
 
 func (s *transaction) WithGraph(graphName string) graph.Transaction {
-	s.targetGraph = graphName
 	s.hasTargetGraph = true
+	s.targetGraphSchema = graph.Graph{
+		Name: graphName,
+	}
 
 	return s
 }
@@ -46,18 +48,16 @@ func (s *transaction) Close() {
 func (s *transaction) getTargetGraph() (Graph, error) {
 	if !s.hasTargetGraph {
 		return Graph{}, fmt.Errorf("postgresql driver requires a graph target to be set")
-	} else if targetGraph, hasGraph := s.schema.Graphs[s.targetGraph]; !hasGraph {
-		return Graph{}, fmt.Errorf("unknown graph: %s", s.targetGraph)
-	} else {
-		return targetGraph, nil
 	}
+
+	return s.schemaManager.AssertGraph(s, s.targetGraphSchema)
 }
 
 func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {
 	if graphTarget, err := s.getTargetGraph(); err != nil {
 		return nil, err
-	} else if kindIDSlice, hasAllIDs := s.schema.KindIDs(kinds...); !hasAllIDs {
-		return nil, fmt.Errorf("unable to map all kinds: %v", kinds)
+	} else if kindIDSlice, err := s.schemaManager.AssertKinds(s, kinds); err != nil {
+		return nil, err
 	} else {
 		var (
 			nodeID int32
@@ -98,8 +98,8 @@ func (s *transaction) CreateRelationship(startNode, endNode *graph.Node, kind gr
 func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, kind graph.Kind, properties *graph.Properties) (*graph.Relationship, error) {
 	if graphTarget, err := s.getTargetGraph(); err != nil {
 		return nil, err
-	} else if kindID, hasKind := s.schema.Kinds[kind]; !hasKind {
-		return nil, fmt.Errorf("unable to map all kind: %s", kind)
+	} else if kindIDSlice, err := s.schemaManager.AssertKinds(s, graph.Kinds{kind}); err != nil {
+		return nil, err
 	} else {
 		var (
 			edgeID int32
@@ -107,7 +107,7 @@ func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, k
 				"graph_id":   graphTarget.ID,
 				"start_id":   startNodeID,
 				"end_id":     endNodeID,
-				"kind_id":    kindID,
+				"kind_id":    kindIDSlice[0],
 				"properties": properties.MapOrEmpty(),
 			})
 		)

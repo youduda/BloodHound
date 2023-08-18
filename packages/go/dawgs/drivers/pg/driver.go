@@ -27,7 +27,7 @@ import (
 
 type driver struct {
 	pool                      *pgxpool.Pool
-	schema                    Schema
+	schemaManager             *SchemaManager
 	defaultTransactionTimeout time.Duration
 }
 
@@ -62,7 +62,7 @@ func (s *driver) transaction(ctx context.Context, txDelegate graph.TransactionDe
 	} else {
 		defer conn.Release()
 
-		if tx, err := newTransaction(ctx, conn, pgxOptions, s.schema); err != nil {
+		if tx, err := newTransaction(ctx, conn, pgxOptions, s.schemaManager); err != nil {
 			return err
 		} else {
 			defer tx.Close()
@@ -84,20 +84,19 @@ func (s *driver) WriteTransaction(ctx context.Context, txDelegate graph.Transact
 	return s.transaction(ctx, txDelegate, readWriteTxOptions, graph.TransactionConfig{})
 }
 
-func (s *driver) FetchSchema(ctx context.Context) (*graph.DatabaseSchema, error) {
-	schema := graph.NewDatabaseSchema()
-	return schema, nil
+func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
+	return graph.Schema{}, nil
 }
 
 func (s *driver) updateSchema(ctx context.Context) error {
 	return s.ReadTransaction(ctx, func(tx graph.Transaction) error {
-		return s.schema.Fetch(tx)
+		return s.schemaManager.fetch(tx)
 	})
 }
 
-func (s *driver) AssertSchema(ctx context.Context, graphSchema *graph.DatabaseSchema) error {
+func (s *driver) AssertSchema(ctx context.Context, graphSchema graph.Schema) error {
 	return s.WriteTransaction(ctx, func(tx graph.Transaction) error {
-		return s.schema.Define(tx, graphSchema)
+		return s.schemaManager.AssertSchema(tx, graphSchema)
 	})
 }
 
