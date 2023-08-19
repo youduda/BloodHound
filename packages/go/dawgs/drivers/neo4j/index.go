@@ -28,9 +28,23 @@ const (
 	nativeBTreeIndexProvider  = "native-btree-1.0"
 	nativeLuceneIndexProvider = "lucene+native-3.0"
 
-	createPropertyIndexStatement      = "CALL db.createIndex($name, $labels, $properties, $provider);"
-	createPropertyConstraintStatement = "CALL db.createUniquePropertyConstraint($name, $labels, $properties, $provider)"
+	dropPropertyIndexStatement        = "drop index $name;"
+	dropPropertyConstraintStatement   = "drop constraint $name;"
+	createPropertyIndexStatement      = "call db.createIndex($name, $labels, $properties, $provider);"
+	createPropertyConstraintStatement = "call db.createUniquePropertyConstraint($name, $labels, $properties, $provider);"
 )
+
+type neo4jIndex struct {
+	graph.Index
+
+	kind graph.Kind
+}
+
+type neo4jConstraint struct {
+	graph.Constraint
+
+	kind graph.Kind
+}
 
 func parseProviderType(provider string) graph.IndexType {
 	switch provider {
@@ -54,196 +68,212 @@ func indexTypeProvider(indexType graph.IndexType) string {
 	}
 }
 
-func AssertNodePropertyIndex(db graph.Database, kind graph.Kind, propertyName string, indexType graph.IndexType) error {
-	return db.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
-		statement := strings.Builder{}
+func allIndexes(graphSchema graph.Graph, dbKinds graph.Kinds) map[string]neo4jIndex {
+	indexes := map[string]neo4jIndex{}
 
-		if indexType != graph.BTreeIndex {
-			statement.WriteString("create ")
-			statement.WriteString(indexTypeProvider(indexType))
-			statement.WriteString(" index ")
-		} else {
-			statement.WriteString("create index ")
+	for _, index := range graphSchema.Indexes {
+		for _, kind := range dbKinds {
+			indexName := index.Name
+
+			if indexName == "" {
+				indexName = strings.ToLower(kind.String()) + "_" + strings.ToLower(index.Field) + "_index"
+			}
+
+			indexes[indexName] = neo4jIndex{
+				Index: index,
+				kind:  kind,
+			}
 		}
+	}
 
-		statement.WriteString(strings.ToLower(kind.String()))
-		statement.WriteString("_")
-		statement.WriteString(strings.ToLower(propertyName))
-		statement.WriteString("_")
-		statement.WriteString(indexType.String())
-		statement.WriteString(" if not exists for (n:")
-		statement.WriteString(kind.String())
-		statement.WriteString(") on (n.")
-		statement.WriteString(propertyName)
-		statement.WriteString(");")
+	return indexes
+}
 
-		if result := tx.Run(statement.String(), nil); result.Error() != nil {
-			return result.Error()
-		} else {
+func allConstraints(graphSchema graph.Graph, dbKinds graph.Kinds) map[string]neo4jConstraint {
+	constraints := map[string]neo4jConstraint{}
+
+	for _, constraint := range graphSchema.Constraints {
+		for _, kind := range dbKinds {
+			constraintName := constraint.Name
+
+			if constraintName == "" {
+				constraintName = strings.ToLower(kind.String()) + "_" + strings.ToLower(constraint.Field) + "_constraint"
+			}
+
+			constraints[constraintName] = neo4jConstraint{
+				Constraint: constraint,
+				kind:       kind,
+			}
+		}
+	}
+
+	return constraints
+}
+
+func assertIndexes(ctx context.Context, db graph.Database, indexesToRemove []string, indexesToAdd map[string]neo4jIndex) error {
+	return db.WriteTransaction(ctx, func(tx graph.Transaction) error {
+		nameMap := map[string]any{}
+
+		for _, indexToRemove := range indexesToRemove {
+			nameMap["name"] = indexToRemove
+
+			result := tx.Run(dropPropertyIndexStatement, nameMap)
 			result.Close()
+
+			if err := result.Error(); err != nil {
+				return err
+			}
+		}
+		for indexName, indexToAdd := range indexesToAdd {
+			if err := db.Run(ctx, createPropertyIndexStatement, map[string]interface{}{
+				"name":       indexName,
+				"labels":     []string{indexToAdd.kind.String()},
+				"properties": []string{indexToAdd.Field},
+				"provider":   indexTypeProvider(indexToAdd.Type),
+			}); err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
 }
 
-func formatDropSchemaCypherStmts(indexSchemas []graph.Index, constraintSchemas []graph.Constraint) []string {
-	var (
-		cypherStatements []string
-		builder          strings.Builder
-	)
+func assertConstraints(ctx context.Context, db graph.Database, constraintsToRemove []string, constraintsToAdd map[string]neo4jConstraint) error {
+	nameMap := map[string]any{}
 
-	for _, propertyIndexSchema := range indexSchemas {
-		builder.WriteString("drop index ")
-		builder.WriteString(propertyIndexSchema.Name)
-		builder.WriteString(";")
+	for _, constraintToRemove := range constraintsToRemove {
+		nameMap["name"] = constraintToRemove
 
-		cypherStatements = append(cypherStatements, builder.String())
-		builder.Reset()
+		if err := db.Run(ctx, dropPropertyConstraintStatement, nameMap); err != nil {
+			return err
+		}
 	}
 
-	for _, propertyConstraintSchema := range constraintSchemas {
-		builder.WriteString("drop constraint ")
-		builder.WriteString(propertyConstraintSchema.Name)
-		builder.WriteString(";")
-
-		cypherStatements = append(cypherStatements, builder.String())
-		builder.Reset()
+	for constraintName, constraintToAdd := range constraintsToAdd {
+		if err := db.Run(ctx, createPropertyConstraintStatement, map[string]interface{}{
+			"name":       constraintName,
+			"labels":     []string{constraintToAdd.kind.String()},
+			"properties": []string{constraintToAdd.Field},
+			"provider":   indexTypeProvider(constraintToAdd.Type),
+		}); err != nil {
+			return err
+		}
 	}
-
-	return cypherStatements
-}
-
-func assertAgainst(ctx context.Context, requiredSchema, existingSchema graph.Schema, db graph.Database) error {
-	//var (
-	//	createConstraints = func(kind graph.Kind, constraints []graph.Constraint) error {
-	//		for _, constraintToCreate := range constraints {
-	//			if err := db.Run(ctx, createPropertyConstraintStatement, map[string]interface{}{
-	//				"name":       constraintToCreate.Name,
-	//				"labels":     []string{kind.String()},
-	//				"properties": []string{constraintToCreate.Field},
-	//				"provider":   indexTypeProvider(constraintToCreate.Type),
-	//			}); err != nil {
-	//				return err
-	//			}
-	//		}
-	//
-	//		return nil
-	//	}
-	//
-	//	createIndices = func(kind graph.Kind, indexes []graph.Index) error {
-	//		for _, indexToCreate := range indexes {
-	//			if err := db.Run(ctx, createPropertyIndexStatement, map[string]interface{}{
-	//				"name":       indexToCreate.Name,
-	//				"labels":     []string{kind.String()},
-	//				"properties": []string{indexToCreate.Field},
-	//				"provider":   indexTypeProvider(indexToCreate.Type),
-	//			}); err != nil {
-	//				return err
-	//			}
-	//		}
-	//
-	//		return nil
-	//	}
-	//)
-	//
-	//for _, existingGraphSchema := range existingSchema.Graphs {
-	//	for _, requiredIndex := range existingGraphSchema.Indexes {
-	//
-	//	}
-	//}
-	//
-	//for _, kindSchema := range existingSchema.Kinds {
-	//	if requiredKindSchema, hasMatchingDefinition := requiredSchema.Kinds[kindSchema.Kind]; !hasMatchingDefinition {
-	//		// Remove all schematic definitions for the kind since there's no matching requirement
-	//		for _, dropStmt := range formatDropSchemaCypherStmts(kindSchema.PropertyIndices, kindSchema.PropertyConstraints) {
-	//			if err := db.Run(ctx, dropStmt, nil); err != nil {
-	//				return err
-	//			}
-	//		}
-	//	} else {
-	//		var (
-	//			indicesToAdd        = map[string]graph.IndexSchema{}
-	//			indicesToRemove     = map[string]graph.IndexSchema{}
-	//			constraintsToAdd    = map[string]graph.ConstraintSchema{}
-	//			constraintsToRemove = map[string]graph.ConstraintSchema{}
-	//		)
-	//
-	//		// Match existing schematics to the definitions first
-	//		for property, indexSchema := range kindSchema.PropertyIndices {
-	//			if requiredIndexSchema, hasMatchingDefinition := requiredKindSchema.PropertyIndices[property]; !hasMatchingDefinition {
-	//				// If there's no matching index for this property defined, remove it from the database
-	//				indicesToRemove[property] = indexSchema
-	//			} else if !indexSchema.Equals(requiredIndexSchema) {
-	//				// The existing index does not match the requirement properties, recreate it
-	//				indicesToRemove[property] = indexSchema
-	//				indicesToAdd[property] = requiredIndexSchema
-	//			}
-	//		}
-	//
-	//		// Sweep required schematics to ensure that missing entries are created
-	//		for property, requiredIndexSchema := range requiredKindSchema.PropertyIndices {
-	//			if _, hasMatchingDefinition := kindSchema.PropertyIndices[property]; !hasMatchingDefinition {
-	//				// If there's no matching index for this property defined, create it
-	//				indicesToAdd[property] = requiredIndexSchema
-	//			}
-	//		}
-	//
-	//		for property, constraintSchema := range kindSchema.PropertyConstraints {
-	//			if requiredConstraintSchema, hasMatchingDefinition := requiredKindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
-	//				// If there's no matching constraint for this property defined, remove it from the database
-	//				constraintsToRemove[property] = constraintSchema
-	//			} else if !constraintSchema.Equals(requiredConstraintSchema) {
-	//				// The existing constraint does not match the requirement properties, recreate it
-	//				constraintsToRemove[property] = constraintSchema
-	//				constraintsToAdd[property] = requiredConstraintSchema
-	//			}
-	//		}
-	//
-	//		for property, constraintSchema := range requiredKindSchema.PropertyConstraints {
-	//			if _, hasMatchingDefinition := kindSchema.PropertyConstraints[property]; !hasMatchingDefinition {
-	//				// If there's no matching constraint for this property defined, create it
-	//				constraintsToAdd[property] = constraintSchema
-	//			}
-	//		}
-	//
-	//		// Drop all indices and constraints first
-	//		for _, dropStmt := range formatDropSchemaCypherStmts(indicesToRemove, constraintsToRemove) {
-	//			if err := db.Run(ctx, dropStmt, nil); err != nil {
-	//				return err
-	//			}
-	//		}
-	//
-	//		if err := createIndices(requiredKindSchema, indicesToAdd); err != nil {
-	//			return err
-	//		}
-	//
-	//		if err := createConstraints(requiredKindSchema, constraintsToAdd); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-	//
-	//for _, requiredKindSchema := range requiredSchema.Kinds {
-	//	if _, hasMatchingDefinition := existingSchema.Kinds[requiredKindSchema.Kind]; !hasMatchingDefinition {
-	//		// There's no matching definitions for indices or constraints for the required kind. Create them.
-	//		if err := createIndices(requiredKindSchema, requiredKindSchema.PropertyIndices); err != nil {
-	//			return err
-	//		}
-	//
-	//		if err := createConstraints(requiredKindSchema, requiredKindSchema.PropertyConstraints); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
 
 	return nil
 }
 
-func AssertSchema(ctx context.Context, db graph.Database, desiredSchema graph.Schema) error {
-	if existingSchema, err := db.FetchSchema(ctx); err != nil {
-		return fmt.Errorf("could not load schema: %w", err)
+func assertGraphSchema(ctx context.Context, db graph.Database, graphSchema graph.Graph, presentIndexes) error {
+	var (
+		presentIndexes      = allIndexes(presentSchema, presentSchema.Kinds)
+		presentConstraints  = allConstraints(presentSchema, presentSchema.Kinds)
+		requiredIndexes     = allIndexes(graphSchema, graphSchema.Kinds)
+		requiredConstraints = allConstraints(graphSchema, graphSchema.Kinds)
+
+		indexesToRemove     []string
+		constraintsToRemove []string
+		indexesToAdd        = map[string]neo4jIndex{}
+		constraintsToAdd    = map[string]neo4jConstraint{}
+	)
+
+	for existingIndexName := range presentIndexes {
+		if _, hasMatchingDefinition := requiredIndexes[existingIndexName]; !hasMatchingDefinition {
+			indexesToRemove = append(indexesToRemove, existingIndexName)
+		}
+	}
+
+	for existingConstraintName := range presentConstraints {
+		if _, hasMatchingDefinition := requiredConstraints[existingConstraintName]; !hasMatchingDefinition {
+			constraintsToRemove = append(constraintsToRemove, existingConstraintName)
+		}
+	}
+
+	for requiredIndexName, requiredIndex := range requiredIndexes {
+		if existingIndex, hasMatchingDefinition := presentIndexes[requiredIndexName]; !hasMatchingDefinition {
+			indexesToAdd[requiredIndexName] = requiredIndex
+		} else if requiredIndex.Type != existingIndex.Type {
+			indexesToRemove = append(indexesToRemove, requiredIndexName)
+			indexesToAdd[requiredIndexName] = requiredIndex
+		}
+	}
+
+	for requiredConstraintName, requiredConstraint := range requiredConstraints {
+		if existingConstraint, hasMatchingDefinition := presentConstraints[requiredConstraintName]; !hasMatchingDefinition {
+			constraintsToAdd[requiredConstraintName] = requiredConstraint
+		} else if requiredConstraint.Type != existingConstraint.Type {
+			constraintsToRemove = append(constraintsToRemove, requiredConstraintName)
+			constraintsToAdd[requiredConstraintName] = requiredConstraint
+		}
+	}
+
+	if err := assertConstraints(ctx, db, constraintsToRemove, constraintsToAdd); err != nil {
+		return err
+	}
+
+	return assertIndexes(ctx, db, indexesToRemove, indexesToAdd)
+}
+
+func presentIndexesAndConstraints(ctx context.Context, db graph.Database) ([]graph.Index, []graph.Constraint, error) {
+	var (
+		indexes     []graph.Index
+		constraints []graph.Constraint
+	)
+
+	return indexes, constraints, db.ReadTransaction(ctx, func(tx graph.Transaction) error {
+		if result := tx.Run("call db.indexes() yield name, uniqueness, provider, labelsOrTypes, properties;", nil); result.Error() != nil {
+			return result.Error()
+		} else {
+			defer result.Close()
+
+			var (
+				name       string
+				uniqueness string
+				provider   string
+				labels     []string
+				properties []string
+			)
+
+			for result.Next() {
+				if err := result.Scan(&name, &uniqueness, &provider, &labels, &properties); err != nil {
+					return err
+				}
+
+				// Need this for neo4j 4.4+ which creates a weird index by default
+				if len(labels) == 0 {
+					continue
+				}
+
+				if len(labels) > 1 || len(properties) > 1 {
+					return fmt.Errorf("composite index types are currently not supported")
+				}
+
+				if uniqueness == "UNIQUE" {
+					constraints = append(constraints, graph.Constraint{
+						Name:  name,
+						Field: properties[0],
+						Type:  parseProviderType(provider),
+					})
+				} else {
+					indexes = append(indexes, graph.Index{
+						Name:  name,
+						Field: properties[0],
+						Type:  parseProviderType(provider),
+					})
+				}
+			}
+
+			return result.Error()
+		}
+	})
+}
+
+func assertSchema(ctx context.Context, db graph.Database, dbSchema graph.Schema) error {
+	if presentIndexes, presentConstraints, err := presentIndexesAndConstraints(ctx, db); err != nil {
+		return err
 	} else {
-		return assertAgainst(ctx, desiredSchema, existingSchema, db)
+		for _, requiredGraph := range requiredSchema.Graphs {
+
+		}
 	}
 }

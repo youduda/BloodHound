@@ -43,7 +43,7 @@ type Index struct {
 	Type  IndexType
 }
 
-type Constraint = Index
+type Constraint Index
 
 type Graph struct {
 	Kinds       Kinds

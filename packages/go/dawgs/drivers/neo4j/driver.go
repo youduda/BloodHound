@@ -140,6 +140,26 @@ func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
 		}
 	)
 
+	if err := s.ReadTransaction(ctx, func(tx graph.Transaction) error {
+		if result := tx.Run("call db.relationshipTypes();", nil); result.Error() != nil {
+			return result.Error()
+		} else {
+			var relationshipType string
+
+			for result.Next() {
+				if err := result.Scan(&relationshipType); err != nil {
+					return err
+				}
+
+				graphSchema.Kinds = graphSchema.Kinds.Add(graph.StringKind(relationshipType))
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return dbSchema, err
+	}
+
 	return dbSchema, s.ReadTransaction(ctx, func(tx graph.Transaction) error {
 		if result := tx.Run("call db.indexes() yield name, uniqueness, provider, labelsOrTypes, properties;", nil); result.Error() != nil {
 			return result.Error()
@@ -196,7 +216,7 @@ func (s *driver) AssertSchema(ctx context.Context, schema graph.Schema) error {
 	if existingSchema, err := s.FetchSchema(ctx); err != nil {
 		return fmt.Errorf("could not load schema: %w", err)
 	} else {
-		return assertAgainst(ctx, schema, existingSchema, s)
+		return assertSchema(ctx, schema, existingSchema, s)
 	}
 }
 
