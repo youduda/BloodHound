@@ -38,7 +38,8 @@ func AzureGraphName(suffix string) string {
 
 func AzureGraphSchema() graph.Graph {
 	return graph.Graph{
-		Kinds: append(azure.NodeKinds(), azure.Relationships()...),
+		Nodes: azure.NodeKinds(),
+		Edges: azure.Relationships(),
 		Constraints: []graph.Constraint{{
 			Field: common.ObjectID.String(),
 			Type:  graph.FullTextSearchIndex,
@@ -66,7 +67,8 @@ func AzureGraphSchema() graph.Graph {
 
 func ActiveDirectoryGraphSchema() graph.Graph {
 	return graph.Graph{
-		Kinds: append(ad.NodeKinds(), ad.Relationships()...),
+		Nodes: ad.NodeKinds(),
+		Edges: ad.Relationships(),
 		Constraints: []graph.Constraint{{
 			Field: common.ObjectID.String(),
 			Type:  graph.FullTextSearchIndex,

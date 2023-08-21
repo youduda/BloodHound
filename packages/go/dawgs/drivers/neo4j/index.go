@@ -46,6 +46,56 @@ type neo4jConstraint struct {
 	kind graph.Kind
 }
 
+type neo4jSchema struct {
+	Indexes     map[string]neo4jIndex
+	Constraints map[string]neo4jConstraint
+}
+
+func newNeo4jSchema() neo4jSchema {
+	return neo4jSchema{
+		Indexes:     map[string]neo4jIndex{},
+		Constraints: map[string]neo4jConstraint{},
+	}
+}
+
+func toNeo4jSchema(dbSchema graph.Schema) neo4jSchema {
+	neo4jSchemaInst := newNeo4jSchema()
+
+	for _, graphSchema := range dbSchema.Graphs {
+		for _, index := range graphSchema.Indexes {
+			for _, kind := range graphSchema.Nodes {
+				indexName := strings.ToLower(kind.String()) + "_" + strings.ToLower(index.Field) + "_index"
+
+				neo4jSchemaInst.Indexes[indexName] = neo4jIndex{
+					Index: graph.Index{
+						Name:  indexName,
+						Field: index.Field,
+						Type:  index.Type,
+					},
+					kind: kind,
+				}
+			}
+		}
+
+		for _, constraint := range graphSchema.Constraints {
+			for _, kind := range graphSchema.Nodes {
+				constraintName := strings.ToLower(kind.String()) + "_" + strings.ToLower(constraint.Field) + "_constraint"
+
+				neo4jSchemaInst.Constraints[constraintName] = neo4jConstraint{
+					Constraint: graph.Constraint{
+						Name:  constraintName,
+						Field: constraint.Field,
+						Type:  constraint.Type,
+					},
+					kind: kind,
+				}
+			}
+		}
+	}
+
+	return neo4jSchemaInst
+}
+
 func parseProviderType(provider string) graph.IndexType {
 	switch provider {
 	case nativeBTreeIndexProvider:
@@ -68,62 +118,17 @@ func indexTypeProvider(indexType graph.IndexType) string {
 	}
 }
 
-func allIndexes(graphSchema graph.Graph, dbKinds graph.Kinds) map[string]neo4jIndex {
-	indexes := map[string]neo4jIndex{}
-
-	for _, index := range graphSchema.Indexes {
-		for _, kind := range dbKinds {
-			indexName := index.Name
-
-			if indexName == "" {
-				indexName = strings.ToLower(kind.String()) + "_" + strings.ToLower(index.Field) + "_index"
-			}
-
-			indexes[indexName] = neo4jIndex{
-				Index: index,
-				kind:  kind,
-			}
-		}
-	}
-
-	return indexes
-}
-
-func allConstraints(graphSchema graph.Graph, dbKinds graph.Kinds) map[string]neo4jConstraint {
-	constraints := map[string]neo4jConstraint{}
-
-	for _, constraint := range graphSchema.Constraints {
-		for _, kind := range dbKinds {
-			constraintName := constraint.Name
-
-			if constraintName == "" {
-				constraintName = strings.ToLower(kind.String()) + "_" + strings.ToLower(constraint.Field) + "_constraint"
-			}
-
-			constraints[constraintName] = neo4jConstraint{
-				Constraint: constraint,
-				kind:       kind,
-			}
-		}
-	}
-
-	return constraints
-}
-
 func assertIndexes(ctx context.Context, db graph.Database, indexesToRemove []string, indexesToAdd map[string]neo4jIndex) error {
 	return db.WriteTransaction(ctx, func(tx graph.Transaction) error {
-		nameMap := map[string]any{}
-
 		for _, indexToRemove := range indexesToRemove {
-			nameMap["name"] = indexToRemove
-
-			result := tx.Run(dropPropertyIndexStatement, nameMap)
+			result := tx.Run(strings.Replace(dropPropertyIndexStatement, "$name", indexToRemove, 1), nil)
 			result.Close()
 
 			if err := result.Error(); err != nil {
 				return err
 			}
 		}
+
 		for indexName, indexToAdd := range indexesToAdd {
 			if err := db.Run(ctx, createPropertyIndexStatement, map[string]interface{}{
 				"name":       indexName,
@@ -140,12 +145,8 @@ func assertIndexes(ctx context.Context, db graph.Database, indexesToRemove []str
 }
 
 func assertConstraints(ctx context.Context, db graph.Database, constraintsToRemove []string, constraintsToAdd map[string]neo4jConstraint) error {
-	nameMap := map[string]any{}
-
 	for _, constraintToRemove := range constraintsToRemove {
-		nameMap["name"] = constraintToRemove
-
-		if err := db.Run(ctx, dropPropertyConstraintStatement, nameMap); err != nil {
+		if err := db.Run(ctx, strings.Replace(dropPropertyConstraintStatement, "$name", constraintToRemove, 1), nil); err != nil {
 			return err
 		}
 	}
@@ -164,63 +165,10 @@ func assertConstraints(ctx context.Context, db graph.Database, constraintsToRemo
 	return nil
 }
 
-func assertGraphSchema(ctx context.Context, db graph.Database, graphSchema graph.Graph, presentIndexes) error {
-	var (
-		presentIndexes      = allIndexes(presentSchema, presentSchema.Kinds)
-		presentConstraints  = allConstraints(presentSchema, presentSchema.Kinds)
-		requiredIndexes     = allIndexes(graphSchema, graphSchema.Kinds)
-		requiredConstraints = allConstraints(graphSchema, graphSchema.Kinds)
+func fetchPresentSchema(ctx context.Context, db graph.Database) (neo4jSchema, error) {
+	presentSchema := newNeo4jSchema()
 
-		indexesToRemove     []string
-		constraintsToRemove []string
-		indexesToAdd        = map[string]neo4jIndex{}
-		constraintsToAdd    = map[string]neo4jConstraint{}
-	)
-
-	for existingIndexName := range presentIndexes {
-		if _, hasMatchingDefinition := requiredIndexes[existingIndexName]; !hasMatchingDefinition {
-			indexesToRemove = append(indexesToRemove, existingIndexName)
-		}
-	}
-
-	for existingConstraintName := range presentConstraints {
-		if _, hasMatchingDefinition := requiredConstraints[existingConstraintName]; !hasMatchingDefinition {
-			constraintsToRemove = append(constraintsToRemove, existingConstraintName)
-		}
-	}
-
-	for requiredIndexName, requiredIndex := range requiredIndexes {
-		if existingIndex, hasMatchingDefinition := presentIndexes[requiredIndexName]; !hasMatchingDefinition {
-			indexesToAdd[requiredIndexName] = requiredIndex
-		} else if requiredIndex.Type != existingIndex.Type {
-			indexesToRemove = append(indexesToRemove, requiredIndexName)
-			indexesToAdd[requiredIndexName] = requiredIndex
-		}
-	}
-
-	for requiredConstraintName, requiredConstraint := range requiredConstraints {
-		if existingConstraint, hasMatchingDefinition := presentConstraints[requiredConstraintName]; !hasMatchingDefinition {
-			constraintsToAdd[requiredConstraintName] = requiredConstraint
-		} else if requiredConstraint.Type != existingConstraint.Type {
-			constraintsToRemove = append(constraintsToRemove, requiredConstraintName)
-			constraintsToAdd[requiredConstraintName] = requiredConstraint
-		}
-	}
-
-	if err := assertConstraints(ctx, db, constraintsToRemove, constraintsToAdd); err != nil {
-		return err
-	}
-
-	return assertIndexes(ctx, db, indexesToRemove, indexesToAdd)
-}
-
-func presentIndexesAndConstraints(ctx context.Context, db graph.Database) ([]graph.Index, []graph.Constraint, error) {
-	var (
-		indexes     []graph.Index
-		constraints []graph.Constraint
-	)
-
-	return indexes, constraints, db.ReadTransaction(ctx, func(tx graph.Transaction) error {
+	return presentSchema, db.ReadTransaction(ctx, func(tx graph.Transaction) error {
 		if result := tx.Run("call db.indexes() yield name, uniqueness, provider, labelsOrTypes, properties;", nil); result.Error() != nil {
 			return result.Error()
 		} else {
@@ -249,17 +197,23 @@ func presentIndexesAndConstraints(ctx context.Context, db graph.Database) ([]gra
 				}
 
 				if uniqueness == "UNIQUE" {
-					constraints = append(constraints, graph.Constraint{
-						Name:  name,
-						Field: properties[0],
-						Type:  parseProviderType(provider),
-					})
+					presentSchema.Constraints[name] = neo4jConstraint{
+						Constraint: graph.Constraint{
+							Name:  name,
+							Field: properties[0],
+							Type:  parseProviderType(provider),
+						},
+						kind: graph.StringKind(labels[0]),
+					}
 				} else {
-					indexes = append(indexes, graph.Index{
-						Name:  name,
-						Field: properties[0],
-						Type:  parseProviderType(provider),
-					})
+					presentSchema.Indexes[name] = neo4jIndex{
+						Index: graph.Index{
+							Name:  name,
+							Field: properties[0],
+							Type:  parseProviderType(provider),
+						},
+						kind: graph.StringKind(labels[0]),
+					}
 				}
 			}
 
@@ -268,12 +222,53 @@ func presentIndexesAndConstraints(ctx context.Context, db graph.Database) ([]gra
 	})
 }
 
-func assertSchema(ctx context.Context, db graph.Database, dbSchema graph.Schema) error {
-	if presentIndexes, presentConstraints, err := presentIndexesAndConstraints(ctx, db); err != nil {
+func assertSchema(ctx context.Context, db graph.Database, required graph.Schema) error {
+	requiredNeo4jSchema := toNeo4jSchema(required)
+
+	if presentNeo4jSchema, err := fetchPresentSchema(ctx, db); err != nil {
 		return err
 	} else {
-		for _, requiredGraph := range requiredSchema.Graphs {
+		var (
+			indexesToRemove     []string
+			constraintsToRemove []string
+			indexesToAdd        = map[string]neo4jIndex{}
+			constraintsToAdd    = map[string]neo4jConstraint{}
+		)
 
+		for presentIndexName := range presentNeo4jSchema.Indexes {
+			if _, hasMatchingDefinition := requiredNeo4jSchema.Indexes[presentIndexName]; !hasMatchingDefinition {
+				indexesToRemove = append(indexesToRemove, presentIndexName)
+			}
 		}
+
+		for existingConstraintName := range presentNeo4jSchema.Constraints {
+			if _, hasMatchingDefinition := requiredNeo4jSchema.Constraints[existingConstraintName]; !hasMatchingDefinition {
+				constraintsToRemove = append(constraintsToRemove, existingConstraintName)
+			}
+		}
+
+		for requiredIndexName, requiredIndex := range requiredNeo4jSchema.Indexes {
+			if existingIndex, hasMatchingDefinition := presentNeo4jSchema.Indexes[requiredIndexName]; !hasMatchingDefinition {
+				indexesToAdd[requiredIndexName] = requiredIndex
+			} else if requiredIndex.Type != existingIndex.Type {
+				indexesToRemove = append(indexesToRemove, requiredIndexName)
+				indexesToAdd[requiredIndexName] = requiredIndex
+			}
+		}
+
+		for requiredConstraintName, requiredConstraint := range requiredNeo4jSchema.Constraints {
+			if existingConstraint, hasMatchingDefinition := presentNeo4jSchema.Constraints[requiredConstraintName]; !hasMatchingDefinition {
+				constraintsToAdd[requiredConstraintName] = requiredConstraint
+			} else if requiredConstraint.Type != existingConstraint.Type {
+				constraintsToRemove = append(constraintsToRemove, requiredConstraintName)
+				constraintsToAdd[requiredConstraintName] = requiredConstraint
+			}
+		}
+
+		if err := assertConstraints(ctx, db, constraintsToRemove, constraintsToAdd); err != nil {
+			return err
+		}
+
+		return assertIndexes(ctx, db, indexesToRemove, indexesToAdd)
 	}
 }

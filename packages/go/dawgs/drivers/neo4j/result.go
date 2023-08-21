@@ -64,6 +64,8 @@ func (s *internalResult) Error() error {
 }
 
 func (s *internalResult) Close() {
-	// Ignore the results of this call. This is called only as a best-effort attempt at a close
-	s.driverResult.Consume()
+	if s.driverResult != nil {
+		// Ignore the results of this call. This is called only as a best-effort attempt at a close
+		s.driverResult.Consume()
+	}
 }

@@ -326,9 +326,6 @@ type Database interface {
 	// AssertSchema will apply the given schema to the underlying database.
 	AssertSchema(ctx context.Context, dbSchema Schema) error
 
-	// FetchSchema will pull the schema of the underlying database and marshal it into the DAWGS schema model.
-	FetchSchema(ctx context.Context) (Schema, error)
-
 	// Run allows a user to pass statements directly to the database. Since results may rely on a transactional context
 	// only an error is returned from this function
 	Run(ctx context.Context, query string, parameters map[string]any) error

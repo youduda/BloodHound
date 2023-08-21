@@ -46,7 +46,8 @@ type Index struct {
 type Constraint Index
 
 type Graph struct {
-	Kinds       Kinds
+	Nodes       Kinds
+	Edges       Kinds
 	Constraints []Constraint
 	Indexes     []Index
 }

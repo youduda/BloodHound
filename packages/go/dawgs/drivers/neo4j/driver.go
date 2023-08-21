@@ -18,7 +18,6 @@ package neo4j
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -130,94 +129,8 @@ func (s *driver) WriteTransaction(ctx context.Context, txDelegate graph.Transact
 	return s.transaction(ctx, txDelegate, session, options)
 }
 
-func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
-	var (
-		graphSchema = graph.Graph{}
-		dbSchema    = graph.Schema{
-			Graphs: []graph.Graph{
-				graphSchema,
-			},
-		}
-	)
-
-	if err := s.ReadTransaction(ctx, func(tx graph.Transaction) error {
-		if result := tx.Run("call db.relationshipTypes();", nil); result.Error() != nil {
-			return result.Error()
-		} else {
-			var relationshipType string
-
-			for result.Next() {
-				if err := result.Scan(&relationshipType); err != nil {
-					return err
-				}
-
-				graphSchema.Kinds = graphSchema.Kinds.Add(graph.StringKind(relationshipType))
-			}
-		}
-
-		return nil
-	}); err != nil {
-		return dbSchema, err
-	}
-
-	return dbSchema, s.ReadTransaction(ctx, func(tx graph.Transaction) error {
-		if result := tx.Run("call db.indexes() yield name, uniqueness, provider, labelsOrTypes, properties;", nil); result.Error() != nil {
-			return result.Error()
-		} else {
-			defer result.Close()
-
-			var (
-				name       string
-				uniqueness string
-				provider   string
-				labels     []string
-				properties []string
-			)
-
-			for result.Next() {
-				if err := result.Scan(&name, &uniqueness, &provider, &labels, &properties); err != nil {
-					return err
-				}
-
-				// Need this for neo4j 4.4+ which creates a weird index by default
-				if len(labels) == 0 {
-					continue
-				}
-
-				if len(labels) > 1 || len(properties) > 1 {
-					return fmt.Errorf("composite index types are currently not supported")
-				}
-
-				if kind := graph.StringKind(labels[0]); !graphSchema.Kinds.ContainsOneOf(kind) {
-					graphSchema.Kinds = graphSchema.Kinds.Add(kind)
-				}
-
-				if uniqueness == "UNIQUE" {
-					graphSchema.Constraints = append(graphSchema.Constraints, graph.Constraint{
-						Name:  name,
-						Field: properties[0],
-						Type:  parseProviderType(provider),
-					})
-				} else {
-					graphSchema.Indexes = append(graphSchema.Indexes, graph.Index{
-						Name:  name,
-						Field: properties[0],
-						Type:  parseProviderType(provider),
-					})
-				}
-			}
-
-			return result.Error()
-		}
-	})
-}
-
 func (s *driver) AssertSchema(ctx context.Context, schema graph.Schema) error {
-	if existingSchema, err := s.FetchSchema(ctx); err != nil {
-		return fmt.Errorf("could not load schema: %w", err)
-	} else {
-		return assertSchema(ctx, schema, existingSchema, s)
-	}
+	return assertSchema(ctx, s, schema)
 }
 
 func (s *driver) Run(ctx context.Context, query string, parameters map[string]any) error {
