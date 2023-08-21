@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/specterops/bloodhound/dawgs"
+	"github.com/specterops/bloodhound/dawgs/drivers/pg/model"
 	"github.com/specterops/bloodhound/dawgs/graph"
 	"time"
 )
@@ -43,7 +44,7 @@ func newDatabase(connectionString string) (graph.Database, error) {
 	} else {
 		return &driver{
 			pool:                      pool,
-			schemaManager:             NewSchemaManager(),
+			schemaManager:             model.NewSchemaManager(),
 			defaultTransactionTimeout: defaultTransactionTimeout,
 		}, nil
 	}

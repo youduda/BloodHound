@@ -40,22 +40,22 @@ func AzureGraphSchema() graph.Graph {
 	return graph.Graph{
 		Nodes: azure.NodeKinds(),
 		Edges: azure.Relationships(),
-		Constraints: []graph.Constraint{{
+		NodeConstraints: []graph.Constraint{{
 			Field: common.ObjectID.String(),
-			Type:  graph.FullTextSearchIndex,
+			Type:  graph.TextSearchIndex,
 		}},
-		Indexes: []graph.Index{
+		NodeIndexes: []graph.Index{
 			{
 				Field: common.Name.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: common.SystemTags.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: common.UserTags.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: azure.TenantID.String(),
@@ -69,22 +69,22 @@ func ActiveDirectoryGraphSchema() graph.Graph {
 	return graph.Graph{
 		Nodes: ad.NodeKinds(),
 		Edges: ad.Relationships(),
-		Constraints: []graph.Constraint{{
+		NodeConstraints: []graph.Constraint{{
 			Field: common.ObjectID.String(),
-			Type:  graph.FullTextSearchIndex,
+			Type:  graph.TextSearchIndex,
 		}},
-		Indexes: []graph.Index{
+		NodeIndexes: []graph.Index{
 			{
 				Field: common.Name.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: common.SystemTags.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: common.UserTags.String(),
-				Type:  graph.FullTextSearchIndex,
+				Type:  graph.TextSearchIndex,
 			},
 			{
 				Field: ad.DistinguishedName.String(),

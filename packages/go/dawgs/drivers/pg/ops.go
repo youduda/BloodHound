@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/specterops/bloodhound/dawgs/drivers/pg/model"
 	"github.com/specterops/bloodhound/dawgs/graph"
 	"strings"
 )
@@ -27,7 +28,7 @@ func InitSchemaUp(ctx context.Context, db graph.Database) error {
 	if driver, typeOK := db.(*driver); !typeOK {
 		return fmt.Errorf("graph database is not a PostgreSQL database")
 	} else {
-		for _, stmt := range strings.Split(graphSchemaSQLUp, ";") {
+		for _, stmt := range strings.Split(model.GraphSchemaSQLUp(), ";") {
 			if err := driver.Run(ctx, stmt, nil); err != nil {
 				return err
 			}
@@ -41,7 +42,7 @@ func InitSchemaDown(ctx context.Context, db graph.Database) error {
 	if driver, typeOK := db.(*driver); !typeOK {
 		return fmt.Errorf("graph database is not a PostgreSQL database")
 	} else {
-		for _, stmt := range strings.Split(graphSchemaSQLDown, ";") {
+		for _, stmt := range strings.Split(model.GraphSchemaSQLDown(), ";") {
 			if err := driver.Run(ctx, stmt, nil); err != nil {
 				return err
 			}

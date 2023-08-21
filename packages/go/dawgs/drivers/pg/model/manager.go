@@ -1,110 +1,11 @@
-package pg
+package model
 
 import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/specterops/bloodhound/dawgs/graph"
-	"strconv"
-	"strings"
 	"sync"
 )
-
-const (
-	nodeTableName = "node"
-	edgeTableName = "edge"
-)
-
-const fetchPartitionSQL = `
-select inhrelid::regclass as child from pg_catalog.pg_inherits
-where inhparent = @parent::regclass
-`
-
-const graphSchemaSQLUp = `
-create table if not exists graph (
-    id serial,
-    name varchar(256) not null,
-
-    primary key (id),
-    unique (name)
-);
-
-create table if not exists kind (
-	id smallserial,
-    name varchar(256) not null,
-
-	primary key (id),
-    unique (name)
-);
-
-create table if not exists node (
-    id serial,
-	graph_id integer not null references graph(id),
-	kind_ids smallint[8] not null,
-	properties jsonb not null,
-
-	primary key (id, graph_id)
-) partition by list (graph_id);
-
-alter table node alter column properties set storage main;
-
-create index if not exists node_graph_id_index on node using btree (graph_id);
-create index if not exists node_kind_ids_index on node using gin (kind_ids);
-
-create table if not exists edge (
-    id serial,
-    graph_id integer not null references graph(id),
-    start_id integer not null,
-    end_id integer not null,
-	kind_id smallint not null,
-	properties jsonb not null,
-
-	primary key (id, graph_id)
-) partition by list (graph_id);
-
-alter table edge alter column properties set storage main;
-
-create index if not exists edge_graph_id_index on edge using btree (graph_id);
-create index if not exists edge_start_id_index on edge using btree (start_id);
-create index if not exists edge_end_id_index on edge using btree (end_id);
-create index if not exists edge_kind_index on edge using btree (kind_id);
-`
-
-const graphSchemaSQLDown = `
-drop table if exists node;
-drop table if exists edge;
-drop table if exists kind;
-drop table if exists graph;
-`
-
-func formatPartitionTableName(parent string, graphID int32) string {
-	return parent + "_" + strconv.FormatInt(int64(graphID), 10)
-}
-
-func formatPartitionTableSQL(parent string, graphID int32) string {
-	var (
-		graphIDStr = strconv.FormatInt(int64(graphID), 10)
-		builder    = strings.Builder{}
-	)
-
-	builder.WriteString("create table ")
-	builder.WriteString(parent)
-	builder.WriteString("_")
-	builder.WriteString(graphIDStr)
-	builder.WriteString(" partition of ")
-	builder.WriteString(parent)
-	builder.WriteString(" for values in (")
-	builder.WriteString(graphIDStr)
-	builder.WriteString(")")
-
-	return builder.String()
-}
-
-type Graph struct {
-	ID            int32
-	Name          string
-	NodePartition string
-	EdgePartition string
-}
 
 type SchemaManager struct {
 	graphs map[string]Graph
@@ -138,8 +39,8 @@ func (s *SchemaManager) fetchGraphs(tx graph.Transaction) error {
 			graphs[graphName] = Graph{
 				ID:            graphID,
 				Name:          graphName,
-				NodePartition: formatPartitionTableName(nodeTableName, graphID),
-				EdgePartition: formatPartitionTableName(edgeTableName, graphID),
+				NodePartition: NewGraphPartitionWithName(formatPartitionTableName(pgNodeTableName, graphID)),
+				EdgePartition: NewGraphPartitionWithName(formatPartitionTableName(pgEdgeTableName, graphID)),
 			}
 		}
 	}
@@ -216,11 +117,11 @@ func (s *SchemaManager) createGraphPartition(tx graph.Transaction, parent string
 }
 
 func (s *SchemaManager) createGraphPartitions(tx graph.Transaction, graphID int32) error {
-	if err := s.createGraphPartition(tx, nodeTableName, graphID); err != nil {
+	if err := s.createGraphPartition(tx, pgNodeTableName, graphID); err != nil {
 		return err
 	}
 
-	return s.createGraphPartition(tx, edgeTableName, graphID)
+	return s.createGraphPartition(tx, pgEdgeTableName, graphID)
 }
 
 func (s *SchemaManager) createGraph(tx graph.Transaction, graphName string, graphSchema graph.Graph) (Graph, error) {
@@ -244,8 +145,8 @@ func (s *SchemaManager) createGraph(tx graph.Transaction, graphName string, grap
 	return Graph{
 		ID:            graphID,
 		Name:          graphName,
-		NodePartition: formatPartitionTableName(nodeTableName, graphID),
-		EdgePartition: formatPartitionTableName(edgeTableName, graphID),
+		NodePartition: NewGraphPartitionWithName(formatPartitionTableName(pgNodeTableName, graphID)),
+		EdgePartition: NewGraphPartitionWithName(formatPartitionTableName(pgEdgeTableName, graphID)),
 	}, nil
 }
 
@@ -275,7 +176,11 @@ func (s *SchemaManager) missingKinds(kinds graph.Kinds) graph.Kinds {
 
 func (s *SchemaManager) defineGraphKinds(tx graph.Transaction, graphSchemas []graph.Graph) error {
 	for _, graphSchema := range graphSchemas {
-		if err := s.defineKinds(tx, s.missingKinds(graphSchema.Kinds)); err != nil {
+		if err := s.defineKinds(tx, s.missingKinds(graphSchema.Nodes)); err != nil {
+			return err
+		}
+
+		if err := s.defineKinds(tx, s.missingKinds(graphSchema.Edges)); err != nil {
 			return err
 		}
 	}
@@ -286,9 +191,14 @@ func (s *SchemaManager) defineGraphKinds(tx graph.Transaction, graphSchemas []gr
 func (s *SchemaManager) defineGraph(tx graph.Transaction, graphName string, graphSchema graph.Graph) error {
 	if graphDefinition, err := s.createGraph(tx, graphName, graphSchema); err != nil {
 		return err
+	} else if err := s.createGraphPartitions(tx, graphDefinition.ID); err != nil {
+		return err
+	} else if err := assertGraphPartitions(tx, graphSchema, graphDefinition); err != nil {
+		return err
 	} else {
 		s.graphs[graphName] = graphDefinition
-		return s.createGraphPartitions(tx, graphDefinition.ID)
+
+		return nil
 	}
 }
 
@@ -363,7 +273,13 @@ func (s *SchemaManager) AssertSchema(tx graph.Transaction, dbSchema graph.Schema
 	}
 
 	for _, graphSchema := range dbSchema.Graphs {
-		if missingKinds := s.missingKinds(graphSchema.Kinds); len(missingKinds) > 0 {
+		if missingKinds := s.missingKinds(graphSchema.Nodes); len(missingKinds) > 0 {
+			if err := s.defineKinds(tx, missingKinds); err != nil {
+				return err
+			}
+		}
+
+		if missingKinds := s.missingKinds(graphSchema.Edges); len(missingKinds) > 0 {
 			if err := s.defineKinds(tx, missingKinds); err != nil {
 				return err
 			}

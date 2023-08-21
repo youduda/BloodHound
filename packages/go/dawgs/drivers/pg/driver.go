@@ -20,6 +20,7 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/specterops/bloodhound/dawgs/drivers/pg/model"
 	"time"
 
 	"github.com/specterops/bloodhound/dawgs/graph"
@@ -27,7 +28,7 @@ import (
 
 type driver struct {
 	pool                      *pgxpool.Pool
-	schemaManager             *SchemaManager
+	schemaManager             *model.SchemaManager
 	defaultTransactionTimeout time.Duration
 }
 

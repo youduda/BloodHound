@@ -19,9 +19,9 @@ package graph
 type IndexType int
 
 const (
-	UnsupportedIndex    IndexType = 0
-	BTreeIndex          IndexType = 1
-	FullTextSearchIndex IndexType = 2
+	UnsupportedIndex IndexType = 0
+	BTreeIndex       IndexType = 1
+	TextSearchIndex  IndexType = 2
 )
 
 func (s IndexType) String() string {
@@ -29,7 +29,7 @@ func (s IndexType) String() string {
 	case BTreeIndex:
 		return "btree"
 
-	case FullTextSearchIndex:
+	case TextSearchIndex:
 		return "fts"
 
 	default:
@@ -46,10 +46,12 @@ type Index struct {
 type Constraint Index
 
 type Graph struct {
-	Nodes       Kinds
-	Edges       Kinds
-	Constraints []Constraint
-	Indexes     []Index
+	Nodes           Kinds
+	Edges           Kinds
+	NodeConstraints []Constraint
+	EdgeConstraints []Constraint
+	NodeIndexes     []Index
+	EdgeIndexes     []Index
 }
 
 type Schema struct {

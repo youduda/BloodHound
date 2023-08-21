@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/specterops/bloodhound/dawgs/drivers/pg/model"
 	"github.com/specterops/bloodhound/dawgs/graph"
 )
 
 type transaction struct {
-	schemaManager     *SchemaManager
+	schemaManager     *model.SchemaManager
 	ctx               context.Context
 	tx                pgx.Tx
 	targetGraphSet    bool
@@ -17,7 +18,7 @@ type transaction struct {
 	targetGraphSchema graph.Graph
 }
 
-func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *SchemaManager) (*transaction, error) {
+func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *model.SchemaManager) (*transaction, error) {
 	if pgxTx, err := conn.BeginTx(ctx, options); err != nil {
 		return nil, err
 	} else {
@@ -45,9 +46,9 @@ func (s *transaction) Close() {
 	}
 }
 
-func (s *transaction) getTargetGraph() (Graph, error) {
+func (s *transaction) getTargetGraph() (model.Graph, error) {
 	if !s.targetGraphSet {
-		return Graph{}, fmt.Errorf("driver operation requires a graph target to be set")
+		return model.Graph{}, fmt.Errorf("driver operation requires a graph target to be set")
 	}
 
 	return s.schemaManager.AssertGraph(s, s.targetGraphName, s.targetGraphSchema)

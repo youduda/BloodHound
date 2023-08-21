@@ -14,7 +14,7 @@ func TestDriver_Run(t *testing.T) {
 	driver, err := dawgs.Open(pg.DriverName, "user=bhe dbname=bhe password=bhe4eva host=localhost")
 	require.Nil(t, err)
 
-	//require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
+	require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
 	require.Nil(t, pg.InitSchemaUp(context.Background(), driver))
 
 	require.Nil(t, driver.AssertSchema(context.Background(), CurrentSchema()))

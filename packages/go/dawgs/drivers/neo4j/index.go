@@ -62,7 +62,7 @@ func toNeo4jSchema(dbSchema graph.Schema) neo4jSchema {
 	neo4jSchemaInst := newNeo4jSchema()
 
 	for _, graphSchema := range dbSchema.Graphs {
-		for _, index := range graphSchema.Indexes {
+		for _, index := range graphSchema.NodeIndexes {
 			for _, kind := range graphSchema.Nodes {
 				indexName := strings.ToLower(kind.String()) + "_" + strings.ToLower(index.Field) + "_index"
 
@@ -77,7 +77,7 @@ func toNeo4jSchema(dbSchema graph.Schema) neo4jSchema {
 			}
 		}
 
-		for _, constraint := range graphSchema.Constraints {
+		for _, constraint := range graphSchema.NodeConstraints {
 			for _, kind := range graphSchema.Nodes {
 				constraintName := strings.ToLower(kind.String()) + "_" + strings.ToLower(constraint.Field) + "_constraint"
 
@@ -101,7 +101,7 @@ func parseProviderType(provider string) graph.IndexType {
 	case nativeBTreeIndexProvider:
 		return graph.BTreeIndex
 	case nativeLuceneIndexProvider:
-		return graph.FullTextSearchIndex
+		return graph.TextSearchIndex
 	default:
 		return graph.UnsupportedIndex
 	}
@@ -111,7 +111,7 @@ func indexTypeProvider(indexType graph.IndexType) string {
 	switch indexType {
 	case graph.BTreeIndex:
 		return nativeBTreeIndexProvider
-	case graph.FullTextSearchIndex:
+	case graph.TextSearchIndex:
 		return nativeLuceneIndexProvider
 	default:
 		return ""
@@ -241,25 +241,25 @@ func assertSchema(ctx context.Context, db graph.Database, required graph.Schema)
 			}
 		}
 
-		for existingConstraintName := range presentNeo4jSchema.Constraints {
-			if _, hasMatchingDefinition := requiredNeo4jSchema.Constraints[existingConstraintName]; !hasMatchingDefinition {
-				constraintsToRemove = append(constraintsToRemove, existingConstraintName)
+		for presentConstraintName := range presentNeo4jSchema.Constraints {
+			if _, hasMatchingDefinition := requiredNeo4jSchema.Constraints[presentConstraintName]; !hasMatchingDefinition {
+				constraintsToRemove = append(constraintsToRemove, presentConstraintName)
 			}
 		}
 
 		for requiredIndexName, requiredIndex := range requiredNeo4jSchema.Indexes {
-			if existingIndex, hasMatchingDefinition := presentNeo4jSchema.Indexes[requiredIndexName]; !hasMatchingDefinition {
+			if presentIndex, hasMatchingDefinition := presentNeo4jSchema.Indexes[requiredIndexName]; !hasMatchingDefinition {
 				indexesToAdd[requiredIndexName] = requiredIndex
-			} else if requiredIndex.Type != existingIndex.Type {
+			} else if requiredIndex.Type != presentIndex.Type {
 				indexesToRemove = append(indexesToRemove, requiredIndexName)
 				indexesToAdd[requiredIndexName] = requiredIndex
 			}
 		}
 
 		for requiredConstraintName, requiredConstraint := range requiredNeo4jSchema.Constraints {
-			if existingConstraint, hasMatchingDefinition := presentNeo4jSchema.Constraints[requiredConstraintName]; !hasMatchingDefinition {
+			if presentConstraint, hasMatchingDefinition := presentNeo4jSchema.Constraints[requiredConstraintName]; !hasMatchingDefinition {
 				constraintsToAdd[requiredConstraintName] = requiredConstraint
-			} else if requiredConstraint.Type != existingConstraint.Type {
+			} else if requiredConstraint.Type != presentConstraint.Type {
 				constraintsToRemove = append(constraintsToRemove, requiredConstraintName)
 				constraintsToAdd[requiredConstraintName] = requiredConstraint
 			}
