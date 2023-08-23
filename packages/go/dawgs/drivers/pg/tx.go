@@ -87,7 +87,7 @@ func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Ki
 			return nil, err
 		}
 
-		return graph.NewNode(graph.ID(nodeID), properties, kinds...), err
+		return graph.NewNode(graph.ID(nodeID), properties, kinds...), nil
 	}
 }
 
@@ -108,10 +108,6 @@ func (s *transaction) UpdateNode(node *graph.Node) error {
 func (s *transaction) Nodes() graph.NodeQuery {
 	//TODO implement me
 	panic("implement me")
-}
-
-func (s *transaction) CreateRelationship(startNode, endNode *graph.Node, kind graph.Kind, properties *graph.Properties) (*graph.Relationship, error) {
-	return nil, fmt.Errorf("unsupported")
 }
 
 func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, kind graph.Kind, properties *graph.Properties) (*graph.Relationship, error) {
@@ -135,7 +131,7 @@ func (s *transaction) CreateRelationshipByIDs(startNodeID, endNodeID graph.ID, k
 			return nil, err
 		}
 
-		return graph.NewRelationship(graph.ID(edgeID), startNodeID, endNodeID, properties, kind), err
+		return graph.NewRelationship(graph.ID(edgeID), startNodeID, endNodeID, properties, kind), nil
 	}
 }
 

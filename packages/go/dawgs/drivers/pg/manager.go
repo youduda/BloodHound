@@ -174,6 +174,10 @@ func (s *SchemaManager) AssertSchema(tx graph.Transaction, schema graph.Schema) 
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	if err := query.On(tx).CreateSchema(); err != nil {
+		return err
+	}
+
 	if err := s.fetch(tx); err != nil {
 		return err
 	}
