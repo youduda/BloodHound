@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/specterops/bloodhound/dawgs"
 	"github.com/specterops/bloodhound/dawgs/drivers/pg"
+	"github.com/specterops/bloodhound/dawgs/drivers/pg/query"
 	"github.com/specterops/bloodhound/dawgs/graph"
 	"github.com/specterops/bloodhound/graphschema/ad"
 	"github.com/stretchr/testify/require"
@@ -14,14 +15,19 @@ func TestDriver_Run(t *testing.T) {
 	driver, err := dawgs.Open(pg.DriverName, "user=bhe dbname=bhe password=bhe4eva host=localhost")
 	require.Nil(t, err)
 
-	require.Nil(t, pg.InitSchemaDown(context.Background(), driver))
-	require.Nil(t, pg.InitSchemaUp(context.Background(), driver))
+	//require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
+	//	return query.On(tx).DropSchema()
+	//}))
+
+	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
+		return query.On(tx).CreateSchema()
+	}))
 
 	require.Nil(t, driver.AssertSchema(context.Background(), CurrentSchema()))
 
 	require.Nil(t, driver.WriteTransaction(context.Background(), func(tx graph.Transaction) error {
 		// Scope to an AD graph
-		tx = tx.WithGraph("ad_graph", ActiveDirectoryGraphSchema())
+		tx = tx.WithGraph(ActiveDirectoryGraphSchema("ad_graph"))
 
 		if domainNode, err := tx.CreateNode(graph.AsProperties(map[string]any{
 			"name":      "user",

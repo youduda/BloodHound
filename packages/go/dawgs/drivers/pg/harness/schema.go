@@ -23,8 +23,9 @@ import (
 	"github.com/specterops/bloodhound/graphschema/common"
 )
 
-func AzureGraphSchema() graph.Graph {
+func AzureGraphSchema(name string) graph.Graph {
 	return graph.Graph{
+		Name:  name,
 		Nodes: azure.NodeKinds(),
 		Edges: azure.Relationships(),
 		NodeConstraints: []graph.Constraint{{
@@ -52,8 +53,9 @@ func AzureGraphSchema() graph.Graph {
 	}
 }
 
-func ActiveDirectoryGraphSchema() graph.Graph {
+func ActiveDirectoryGraphSchema(name string) graph.Graph {
 	return graph.Graph{
+		Name:  name,
 		Nodes: ad.NodeKinds(),
 		Edges: ad.Relationships(),
 		NodeConstraints: []graph.Constraint{{
@@ -92,8 +94,8 @@ func ActiveDirectoryGraphSchema() graph.Graph {
 func CurrentSchema() graph.Schema {
 	return graph.Schema{
 		Graphs: []graph.Graph{
-			ActiveDirectoryGraphSchema(),
-			AzureGraphSchema(),
+			ActiveDirectoryGraphSchema("ad_graph"),
+			AzureGraphSchema("az_graph"),
 		},
 	}
 }

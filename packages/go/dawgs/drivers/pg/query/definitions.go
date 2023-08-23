@@ -1,9 +1,10 @@
-package model
+package query
 
 import "regexp"
 
 var (
-	pgIndexRegex = regexp.MustCompile(`(?i)^CREATE (UNIQUE)? ?INDEX ([^ ]+).+USING ([^ ]+) \(([^)]+)\)$`)
+	pgPropertyIndexRegex = regexp.MustCompile(`(?i)^create\s+(unique)?(?:\s+)?index\s+([^ ]+)\s+on\s+\S+\s+using\s+([^ ]+)\s+\(+properties\s+->>\s+'([^:]+)::.+$`)
+	pgColumnIndexRegex   = regexp.MustCompile(`(?i)^create\s+(unique)?(?:\s+)?index\s+([^ ]+)\s+on\s+\S+\s+using\s+([^ ]+)\s+\(([^)]+)\)$`)
 )
 
 const (
@@ -17,7 +18,4 @@ const (
 	pgIndexTypeGIN     = "gin"
 	pgIndexUniqueStr   = "unique"
 	pgPropertiesColumn = "properties"
-
-	pgNodeTableName = "node"
-	pgEdgeTableName = "edge"
 )

@@ -254,7 +254,7 @@ type Batch interface {
 type Transaction interface {
 	// WithGraph scopes the transaction to a specific graph. If the driver for the transaction does not support
 	// multiple  graphs the resulting transaction will target the default graph instead and this call becomes a no-op.
-	WithGraph(graphName string, graphSchema Graph) Transaction
+	WithGraph(graphSchema Graph) Transaction
 
 	// CreateNode creates a new Node in the database and returns the creation as a NodeResult.
 	CreateNode(properties *Properties, kinds ...Kind) (*Node, error)

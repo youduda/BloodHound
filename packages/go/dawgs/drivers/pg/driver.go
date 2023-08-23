@@ -20,15 +20,24 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/specterops/bloodhound/dawgs/drivers/pg/model"
 	"time"
 
 	"github.com/specterops/bloodhound/dawgs/graph"
 )
 
+var (
+	readOnlyTxOptions = pgx.TxOptions{
+		AccessMode: pgx.ReadOnly,
+	}
+
+	readWriteTxOptions = pgx.TxOptions{
+		AccessMode: pgx.ReadWrite,
+	}
+)
+
 type driver struct {
 	pool                      *pgxpool.Pool
-	schemaManager             *model.SchemaManager
+	schemaManager             *SchemaManager
 	defaultTransactionTimeout time.Duration
 }
 
@@ -46,16 +55,6 @@ func (s *driver) Close(ctx context.Context) error {
 	s.pool.Close()
 	return nil
 }
-
-var (
-	readOnlyTxOptions = pgx.TxOptions{
-		AccessMode: pgx.ReadOnly,
-	}
-
-	readWriteTxOptions = pgx.TxOptions{
-		AccessMode: pgx.ReadWrite,
-	}
-)
 
 func (s *driver) transaction(ctx context.Context, txDelegate graph.TransactionDelegate, pgxOptions pgx.TxOptions, dawgsOptions graph.TransactionConfig) error {
 	if conn, err := s.pool.Acquire(ctx); err != nil {
@@ -89,9 +88,9 @@ func (s *driver) FetchSchema(ctx context.Context) (graph.Schema, error) {
 	return graph.Schema{}, nil
 }
 
-func (s *driver) AssertSchema(ctx context.Context, graphSchema graph.Schema) error {
+func (s *driver) AssertSchema(ctx context.Context, schema graph.Schema) error {
 	return s.WriteTransaction(ctx, func(tx graph.Transaction) error {
-		return s.schemaManager.AssertSchema(tx, graphSchema)
+		return s.schemaManager.AssertSchema(tx, schema)
 	})
 }
 

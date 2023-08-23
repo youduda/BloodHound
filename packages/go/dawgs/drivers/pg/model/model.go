@@ -2,20 +2,25 @@ package model
 
 import (
 	"github.com/specterops/bloodhound/dawgs/graph"
-	"strings"
 )
 
 type IndexChangeSet struct {
 	NodeIndexesToRemove     []string
+	EdgeIndexesToRemove     []string
 	NodeConstraintsToRemove []string
+	EdgeConstraintsToRemove []string
 	NodeIndexesToAdd        map[string]graph.Index
+	EdgeIndexesToAdd        map[string]graph.Index
 	NodeConstraintsToAdd    map[string]graph.Constraint
+	EdgeConstraintsToAdd    map[string]graph.Constraint
 }
 
 func NewIndexChangeSet() IndexChangeSet {
 	return IndexChangeSet{
 		NodeIndexesToAdd:     map[string]graph.Index{},
 		NodeConstraintsToAdd: map[string]graph.Constraint{},
+		EdgeIndexesToAdd:     map[string]graph.Index{},
+		EdgeConstraintsToAdd: map[string]graph.Constraint{},
 	}
 }
 
@@ -25,14 +30,7 @@ type GraphPartition struct {
 	Constraints map[string]graph.Constraint
 }
 
-func NewGraphPartition() GraphPartition {
-	return GraphPartition{
-		Indexes:     map[string]graph.Index{},
-		Constraints: map[string]graph.Constraint{},
-	}
-}
-
-func NewGraphPartitionWithName(name string) GraphPartition {
+func NewGraphPartition(name string) GraphPartition {
 	return GraphPartition{
 		Name:        name,
 		Indexes:     map[string]graph.Index{},
@@ -48,41 +46,23 @@ func NewGraphPartitionFromSchema(name string, indexes []graph.Index, constraints
 	}
 
 	for _, index := range indexes {
-		graphPartition.Indexes[formatIndexName(name, index)] = index
+		graphPartition.Indexes[IndexName(name, index)] = index
 	}
 
 	for _, constraint := range constraints {
-		graphPartition.Constraints[formatConstraintName(name, constraint)] = constraint
+		graphPartition.Constraints[ConstraintName(name, constraint)] = constraint
 	}
 
 	return graphPartition
 }
 
+type GraphPartitions struct {
+	Node GraphPartition
+	Edge GraphPartition
+}
+
 type Graph struct {
-	ID            int32
-	Name          string
-	NodePartition GraphPartition
-	EdgePartition GraphPartition
-}
-
-func pgIndexTypeToString(indexType graph.IndexType) string {
-	switch indexType {
-	case graph.BTreeIndex:
-		return pgIndexTypeBTree
-	case graph.TextSearchIndex:
-		return pgIndexTypeGIN
-	default:
-		return "NOT SUPPORTED"
-	}
-}
-
-func pgParseIndexType(pgType string) graph.IndexType {
-	switch strings.ToLower(pgType) {
-	case pgIndexTypeBTree:
-		return graph.BTreeIndex
-	case pgIndexTypeGIN:
-		return graph.TextSearchIndex
-	default:
-		return graph.UnsupportedIndex
-	}
+	ID         int32
+	Name       string
+	Partitions GraphPartitions
 }

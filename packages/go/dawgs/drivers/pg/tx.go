@@ -10,31 +10,29 @@ import (
 )
 
 type transaction struct {
-	schemaManager     *model.SchemaManager
-	ctx               context.Context
-	tx                pgx.Tx
-	targetGraphSet    bool
-	targetGraphName   string
-	targetGraphSchema graph.Graph
+	schemaManager   *SchemaManager
+	ctx             context.Context
+	tx              pgx.Tx
+	targetSchema    graph.Graph
+	targetSchemaSet bool
 }
 
-func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *model.SchemaManager) (*transaction, error) {
+func newTransaction(ctx context.Context, conn *pgxpool.Conn, options pgx.TxOptions, schemaManager *SchemaManager) (*transaction, error) {
 	if pgxTx, err := conn.BeginTx(ctx, options); err != nil {
 		return nil, err
 	} else {
 		return &transaction{
-			schemaManager:  schemaManager,
-			ctx:            ctx,
-			tx:             pgxTx,
-			targetGraphSet: false,
+			schemaManager:   schemaManager,
+			ctx:             ctx,
+			tx:              pgxTx,
+			targetSchemaSet: false,
 		}, nil
 	}
 }
 
-func (s *transaction) WithGraph(graphName string, graphSchema graph.Graph) graph.Transaction {
-	s.targetGraphSet = true
-	s.targetGraphName = graphName
-	s.targetGraphSchema = graphSchema
+func (s *transaction) WithGraph(schema graph.Graph) graph.Transaction {
+	s.targetSchema = schema
+	s.targetSchemaSet = true
 
 	return s
 }
@@ -47,11 +45,11 @@ func (s *transaction) Close() {
 }
 
 func (s *transaction) getTargetGraph() (model.Graph, error) {
-	if !s.targetGraphSet {
+	if !s.targetSchemaSet {
 		return model.Graph{}, fmt.Errorf("driver operation requires a graph target to be set")
 	}
 
-	return s.schemaManager.AssertGraph(s, s.targetGraphName, s.targetGraphSchema)
+	return s.schemaManager.AssertGraph(s, s.targetSchema)
 }
 
 func (s *transaction) CreateNode(properties *graph.Properties, kinds ...graph.Kind) (*graph.Node, error) {

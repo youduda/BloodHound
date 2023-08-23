@@ -312,6 +312,7 @@ IGNORED_EXTENSIONS = [
     ".crt",
     ".key",
     ".example",
+    ".svg",
 ]
 
 # Any file listed below is included regardless of exclusions.

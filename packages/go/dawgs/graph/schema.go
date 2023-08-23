@@ -46,6 +46,7 @@ type Index struct {
 type Constraint Index
 
 type Graph struct {
+	Name            string
 	Nodes           Kinds
 	Edges           Kinds
 	NodeConstraints []Constraint
