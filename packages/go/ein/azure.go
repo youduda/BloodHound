@@ -699,6 +699,32 @@ func ConvertAzureRoleAssignmentToRels(roleAssignment azure2.UnifiedRoleAssignmen
 	return relationships
 }
 
+func ConvertAzureRoleEligibilityScheduleInstanceToRels(roleEligibilityScheduleInstance azure2.UnifiedRoleEligibilityScheduleInstance, data models.RoleEligibilityScheduleInstances, roleObjectId string) []IngestibleRelationship {
+	var (
+		scope         string
+		relationships = make([]IngestibleRelationship, 0)
+	)
+
+	if roleEligibilityScheduleInstance.DirectoryScopeId == "/" {
+		scope = strings.ToUpper(data.TenantId)
+	} else {
+		scope = strings.ToUpper(roleEligibilityScheduleInstance.DirectoryScopeId[1:])
+	}
+
+	relationships = append(relationships, IngestibleRelationship{
+		Source:     strings.ToUpper(roleEligibilityScheduleInstance.PrincipalId),
+		SourceType: azure.Entity,
+		TargetType: azure.Role,
+		Target:     roleObjectId,
+		RelProps: map[string]any{
+			azure.Scope.String(): scope,
+		},
+		RelType: azure.EligibleRole,
+	})
+
+	return relationships
+}
+
 func ConvertAzureServicePrincipal(data models.ServicePrincipal) ([]IngestibleNode, []IngestibleRelationship) {
 	nodes := make([]IngestibleNode, 0)
 	relationships := make([]IngestibleRelationship, 0)

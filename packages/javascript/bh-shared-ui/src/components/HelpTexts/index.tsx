@@ -30,6 +30,7 @@ import AZGetKeys from './AZGetKeys/AZGetKeys';
 import AZGetSecrets from './AZGetSecrets/AZGetSecrets';
 import AZGlobalAdmin from './AZGlobalAdmin/AZGlobalAdmin';
 import AZHasRole from './AZHasRole/AZHasRole';
+import AZEligibleRole from './AZEligibleRole/AZEligibleRole';
 import AZKeyVaultKVContributor from './AZKeyVaultKVContributor/AZKeyVaultKVContributor';
 import AZLogicAppContributor from './AZLogicAppContributor/AZLogicAppContributor';
 import AZMGAddMember from './AZMGAddMember/AZMGAddMember';
@@ -134,6 +135,7 @@ const EdgeInfoComponents = {
     AZGetKeys: AZGetKeys,
     AZGetSecrets: AZGetSecrets,
     AZHasRole: AZHasRole,
+    AZEligibleRole: AZEligibleRole,
     AZManagedIdentity: AZManagedIdentity,
     AZMemberOf: AZMemberOf,
     AZOwns: AZOwns,

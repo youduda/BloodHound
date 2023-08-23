@@ -557,6 +557,12 @@ HasRole: types.#Kind & {
 	representation: "AZHasRole"
 }
 
+EligibleRole: types.#Kind & {
+	symbol:         "EligibleRole"
+	schema:         "azure"
+	representation: "AZEligibleRole"
+}
+
 MemberOf: types.#Kind & {
 	symbol:         "MemberOf"
 	schema:         "azure"
@@ -709,6 +715,7 @@ RelationshipKinds: [
 	GetKeys,
 	GetSecrets,
 	HasRole,
+	EligibleRole,
 	MemberOf,
 	Owner,
 	RunsAs,
@@ -816,6 +823,7 @@ PathfindingRelationships: [
 	GetKeys,
 	GetSecrets,
 	HasRole,
+	EligibleRole,
 	MemberOf,
 	Owner,
 	RunsAs,

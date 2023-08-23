@@ -102,6 +102,8 @@ func getKindConverter(kind enums.Kind) func(json.RawMessage, *ConvertedAzureData
 		return convertAzureRole
 	case enums.KindAZRoleAssignment:
 		return convertAzureRoleAssignment
+	case enums.KindAZRoleEligibilityScheduleInstance:
+		return convertAzureRoleEligibilityScheduleInstance
 	case enums.KindAZServicePrincipal:
 		return convertAzureServicePrincipal
 	case enums.KindAZServicePrincipalOwner:
@@ -471,6 +473,21 @@ func convertAzureRoleAssignment(raw json.RawMessage, converted *ConvertedAzureDa
 			)
 
 			converted.RelProps = append(converted.RelProps, ein.ConvertAzureRoleAssignmentToRels(raw, data, roleObjectId)...)
+		}
+	}
+}
+
+func convertAzureRoleEligibilityScheduleInstance(raw json.RawMessage, converted *ConvertedAzureData) {
+	var data models.RoleEligibilityScheduleInstances
+	if err := json.Unmarshal(raw, &data); err != nil {
+		log.Errorf(SerialError, "azure role assignment", err)
+	} else {
+		for _, raw := range data.RoleEligibilityScheduleInstances {
+			var (
+				roleObjectId = fmt.Sprintf("%s@%s", strings.ToUpper(raw.RoleDefinitionId), strings.ToUpper(data.TenantId))
+			)
+
+			converted.RelProps = append(converted.RelProps, ein.ConvertAzureRoleEligibilityScheduleInstanceToRels(raw, data, roleObjectId)...)
 		}
 	}
 }
