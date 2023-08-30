@@ -518,6 +518,7 @@ func fetchRolesTraversalPlan(root *graph.Node) ops.TraversalPlan {
 			return query.Or(
 				query.KindIn(query.Relationship(), azure.MemberOf, azure.HasRole),
 				query.KindIn(query.Relationship(), azure.MemberOf, azure.EligibleRole),
+				query.KindIn(query.Relationship(), azure.MemberOf, azure.EligibleGroup),
 			)
 		},
 		DescentFilter: roleDescentFilter,

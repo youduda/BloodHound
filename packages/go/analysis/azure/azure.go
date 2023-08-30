@@ -100,6 +100,7 @@ func GetDescendentKinds(kind graph.Kind) []graph.Kind {
 func AzureNonDescentKinds() graph.Kinds {
 	return []graph.Kind{
 		azure.MemberOf,
+		azure.EligibleGroup,
 		azure.HasRole,
 		azure.EligibleRole,
 		azure.RunsAs,

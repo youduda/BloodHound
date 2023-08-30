@@ -68,6 +68,8 @@ func getKindConverter(kind enums.Kind) func(json.RawMessage, *ConvertedAzureData
 		return convertAzureFunctionAppRoleAssignment
 	case enums.KindAZGroup:
 		return convertAzureGroup
+	case enums.KindAZGroupEligibilityScheduleInstance:
+		return convertAzureGroupEligibilityScheduleInstance
 	case enums.KindAZGroupMember:
 		return convertAzureGroupMember
 	case enums.KindAZGroupOwner:
@@ -293,6 +295,17 @@ func convertAzureGroup(raw json.RawMessage, converted *ConvertedAzureData) {
 	}
 }
 
+func convertAzureGroupEligibilityScheduleInstance(raw json.RawMessage, converted *ConvertedAzureData) {
+	var data models.GroupEligibilityScheduleInstances
+	if err := json.Unmarshal(raw, &data); err != nil {
+		log.Errorf(SerialError, "azure group eligibility", err)
+	} else {
+		for _, raw := range data.GroupEligibilityScheduleInstances {
+			converted.RelProps = append(converted.RelProps, ein.ConvertAzureGroupEligibilityScheduleInstanceToRels(raw, data)...)
+		}
+	}
+}
+
 func convertAzureGroupMember(raw json.RawMessage, converted *ConvertedAzureData) {
 	var (
 		data models.GroupMembers
@@ -480,7 +493,7 @@ func convertAzureRoleAssignment(raw json.RawMessage, converted *ConvertedAzureDa
 func convertAzureRoleEligibilityScheduleInstance(raw json.RawMessage, converted *ConvertedAzureData) {
 	var data models.RoleEligibilityScheduleInstances
 	if err := json.Unmarshal(raw, &data); err != nil {
-		log.Errorf(SerialError, "azure role assignment", err)
+		log.Errorf(SerialError, "azure role eligibility", err)
 	} else {
 		for _, raw := range data.RoleEligibilityScheduleInstances {
 			var (

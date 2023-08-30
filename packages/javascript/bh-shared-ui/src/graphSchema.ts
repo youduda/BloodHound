@@ -500,6 +500,7 @@ export enum AzureRelationshipKind {
     GetSecrets = 'AZGetSecrets',
     HasRole = 'AZHasRole',
     EligibleRole = 'AZEligibleRole',
+    EligibleGroup = 'AZEligibleGroup',
     MemberOf = 'AZMemberOf',
     Owner = 'AZOwner',
     RunsAs = 'AZRunsAs',
@@ -558,6 +559,8 @@ export function AzureRelationshipKindToDisplay(value: AzureRelationshipKind): st
             return 'HasRole';
         case AzureRelationshipKind.EligibleRole:
             return 'EligibleRole';
+        case AzureRelationshipKind.EligibleGroup:
+            return 'EligibleGroup';
         case AzureRelationshipKind.MemberOf:
             return 'MemberOf';
         case AzureRelationshipKind.Owner:
@@ -669,6 +672,7 @@ export enum AzureKind {
     GetSecrets = 'AZGetSecrets',
     HasRole = 'AZHasRole',
     EligibleRole = 'AZEligibleRole',
+    EligibleGroup = 'AZEligibleGroup',
     MemberOf = 'AZMemberOf',
     Owner = 'AZOwner',
     RunsAs = 'AZRunsAs',
@@ -767,6 +771,8 @@ export function AzureKindToDisplay(value: AzureKind): string | undefined {
             return 'HasRole';
         case AzureKind.EligibleRole:
             return 'EligibleRole';
+        case AzureKind.EligibleGroup:
+            return 'EligibleGroup';
         case AzureKind.MemberOf:
             return 'MemberOf';
         case AzureKind.Owner:
@@ -957,6 +963,7 @@ export function AzurePathfindingEdges(): AzureRelationshipKind[] {
         AzureRelationshipKind.GetSecrets,
         AzureRelationshipKind.HasRole,
         AzureRelationshipKind.EligibleRole,
+        AzureRelationshipKind.EligibleGroup,
         AzureRelationshipKind.MemberOf,
         AzureRelationshipKind.Owner,
         AzureRelationshipKind.RunsAs,

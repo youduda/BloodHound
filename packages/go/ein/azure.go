@@ -352,6 +352,21 @@ func ConvertAzureGroupToRel(data models.Group) IngestibleRelationship {
 	}
 }
 
+func ConvertAzureGroupEligibilityScheduleInstanceToRels(groupEligibilityScheduleInstance azure2.PrivilegedAccessGroupEligibilityScheduleInstance, data models.GroupEligibilityScheduleInstances) []IngestibleRelationship {
+	relationships := make([]IngestibleRelationship, 0)
+
+	relationships = append(relationships, IngestibleRelationship{
+		Source:     strings.ToUpper(groupEligibilityScheduleInstance.PrincipalId),
+		SourceType: azure.Entity,
+		TargetType: azure.Group,
+		Target:     strings.ToUpper(data.GroupId),
+		RelProps:   map[string]any{},
+		RelType:    azure.EligibleGroup,
+	})
+
+	return relationships
+}
+
 func ConvertAzureGroupMembersToRels(data models.GroupMembers) []IngestibleRelationship {
 	relationships := make([]IngestibleRelationship, 0)
 
